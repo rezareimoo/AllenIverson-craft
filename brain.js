@@ -1,0 +1,232 @@
+/**
+ * LLM Brain - Processes natural language requests using Ollama (Llama3)
+ */
+
+const { Ollama } = require("ollama");
+
+// Initialize Ollama client
+const ollama = new Ollama({
+  host: process.env.OLLAMA_HOST || "http://localhost:11434",
+});
+
+/**
+ * Processes a user's natural language request using Ollama (Llama3)
+ * and converts it into an ARRAY of structured JSON tasks for multi-step execution.
+ *
+ * @param {string} message - The user's chat message
+ * @returns {Promise<Array|null>} - An array of task objects or null if invalid
+ */
+async function processUserRequest(message) {
+  const systemPrompt = `You are a Minecraft assistant controlling a bot. Translate user commands into a JSON ARRAY of task steps.
+
+CRITICAL: You MUST always output a JSON ARRAY starting with [ and ending with ]. Even for single tasks, wrap it in an array. Never output a single object without array brackets.
+
+Example for single task: [{"type": "collect", "target": "oak_log", "count": 5}]
+Example for multiple tasks: [{"type": "collect", "target": "oak_log", "count": 2}, {"type": "craft", "target": "oak_planks", "count": 8}]
+
+Each task object must have a 'type' field.
+
+Available task types:
+- 'collect': Gather blocks/items from the world
+- 'craft': Craft items (bot will handle crafting table automatically)
+- 'place': Place a block from inventory
+- 'move': Navigate to coordinates or a player
+- 'follow': Continuously follow a player
+- 'stop': Stop all actions and clear the queue
+
+TASK FORMATS:
+
+For 'collect' type:
+{ "type": "collect", "target": "<block_name>", "count": <number> }
+Block names: oak_log, birch_log, spruce_log, diamond_ore, iron_ore, coal_ore, cobblestone, dirt, sand, etc.
+
+For 'craft' type:
+{ "type": "craft", "target": "<item_name>", "count": <number> }
+Item names: oak_planks, birch_planks, stick, crafting_table, wooden_pickaxe, stone_pickaxe, iron_pickaxe, diamond_pickaxe, wooden_sword, chest, furnace, torch, etc.
+
+For 'place' type:
+{ "type": "place", "target": "<block_name>" }
+
+For 'move' type with coordinates:
+{ "type": "move", "x": <number>, "y": <number>, "z": <number> }
+
+For 'move' type to a player:
+{ "type": "move", "player": "<player_name>" }
+
+For 'follow' type:
+{ "type": "follow", "player": "<player_name>" }
+
+For 'stop' type:
+{ "type": "stop" }
+
+CRAFTING RECIPES (use these exact item names):
+- oak_planks: requires 1 oak_log (makes 4)
+- birch_planks: requires 1 birch_log (makes 4)
+- spruce_planks: requires 1 spruce_log (makes 4)
+- stick: requires 2 planks (makes 4)
+- crafting_table: requires 4 planks
+- wooden_pickaxe: requires 3 planks + 2 sticks (needs crafting_table)
+- wooden_sword: requires 2 planks + 1 stick (needs crafting_table)
+- wooden_axe: requires 3 planks + 2 sticks (needs crafting_table)
+- stone_pickaxe: requires 3 cobblestone + 2 sticks (needs crafting_table)
+- iron_pickaxe: requires 3 iron_ingot + 2 sticks (needs crafting_table)
+- diamond_pickaxe: requires 3 diamond + 2 sticks (needs crafting_table)
+- furnace: requires 8 cobblestone (needs crafting_table)
+- chest: requires 8 planks (needs crafting_table)
+- torch: requires 1 coal + 1 stick (makes 4)
+
+MULTI-STEP PLANNING:
+For complex requests, ALWAYS break them into sequential steps. The bot executes tasks in order.
+
+When a user asks for something that requires multiple steps (like crafting an item that needs materials), you MUST create multiple tasks in the array. For example, "make a wooden pickaxe" requires collecting logs, crafting planks, crafting sticks, crafting a crafting table, placing it, and finally crafting the pickaxe - this should be 6 separate tasks in the array.
+
+Example: User says "make me a wooden pickaxe"
+Output:
+[
+  { "type": "collect", "target": "oak_log", "count": 2 },
+  { "type": "craft", "target": "oak_planks", "count": 8 },
+  { "type": "craft", "target": "stick", "count": 4 },
+  { "type": "craft", "target": "crafting_table", "count": 1 },
+  { "type": "place", "target": "crafting_table" },
+  { "type": "craft", "target": "wooden_pickaxe", "count": 1 }
+]
+
+Example: User says "come to me" (assuming user is Steve)
+Output:
+[
+  { "type": "move", "player": "Steve" }
+]
+
+Example: User says "stop"
+Output:
+[
+  { "type": "stop" }
+]
+
+CRITICAL OUTPUT FORMAT:
+- Output ONLY a valid JSON array
+- Start with [ and end with ]
+- No explanations, no markdown code blocks, no text before or after
+- Just the raw JSON array
+- Example format: [{"type":"collect","target":"oak_log","count":2}]
+
+If the command doesn't make sense, output: [{"type":"unknown","reason":"<brief explanation>"}]
+
+Remember: Always return an array, even for single tasks!`;
+
+  // Define JSON schema to force array response
+  const jsonSchema = {
+    type: "array",
+    items: {
+      type: "object",
+      properties: {
+        type: {
+          type: "string",
+          enum: [
+            "collect",
+            "craft",
+            "place",
+            "move",
+            "follow",
+            "stop",
+            "unknown",
+          ],
+        },
+        target: { type: "string" },
+        count: { type: "number" },
+        x: { type: "number" },
+        y: { type: "number" },
+        z: { type: "number" },
+        player: { type: "string" },
+        reason: { type: "string" },
+      },
+      required: ["type"],
+    },
+  };
+
+  try {
+    const response = await ollama.chat({
+      model: process.env.OLLAMA_MODEL || "llama3",
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: message },
+      ],
+      options: {
+        temperature: 0.1, // Low temperature for consistent JSON output
+        num_predict: 800, // Increased for multi-step plans
+      },
+      format: jsonSchema, // Use JSON schema to force array response
+    });
+
+    let content = response.message.content.trim();
+    console.log(`[Brain] LLM Response (raw): ${content}`);
+
+    // Remove markdown code blocks if present (```json ... ```)
+    content = content
+      .replace(/^```json\s*/i, "")
+      .replace(/^```\s*/i, "")
+      .replace(/\s*```$/i, "")
+      .trim();
+
+    // Try to extract JSON from the response if it's wrapped in text
+    // Look for JSON array pattern [...]
+    const jsonMatch = content.match(/\[[\s\S]*\]/);
+    if (jsonMatch) {
+      content = jsonMatch[0];
+    }
+
+    console.log(`[Brain] LLM Response (cleaned): ${content}`);
+
+    // Parse the JSON response
+    let taskArray;
+    try {
+      taskArray = JSON.parse(content);
+    } catch (parseError) {
+      console.error(`[Brain] JSON parse error: ${parseError.message}`);
+      console.error(`[Brain] Content that failed to parse: ${content}`);
+      return null;
+    }
+
+    // Ensure it's always an array
+    if (!Array.isArray(taskArray)) {
+      console.log(
+        `[Brain] Response is not an array, converting: ${JSON.stringify(
+          taskArray
+        )}`
+      );
+      // If it's an object with a 'type' field, wrap it
+      if (taskArray && typeof taskArray === "object" && taskArray.type) {
+        taskArray = [taskArray];
+      } else {
+        console.error(
+          `[Brain] Invalid response format: expected array or task object, got: ${typeof taskArray}`
+        );
+        return null;
+      }
+    }
+
+    console.log(
+      `[Brain] Parsed ${taskArray.length} task(s): ${JSON.stringify(taskArray)}`
+    );
+
+    // Validate that each task has a type field
+    for (const task of taskArray) {
+      if (!task || !task.type) {
+        console.error(
+          "[Brain] Invalid task in response: missing 'type' field",
+          task
+        );
+        return null;
+      }
+    }
+
+    return taskArray;
+  } catch (error) {
+    console.error("[Brain] Error processing request:", error.message);
+    return null;
+  }
+}
+
+module.exports = {
+  processUserRequest,
+};

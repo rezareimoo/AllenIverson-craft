@@ -14,6 +14,6 @@
     "mineflayer": "^4.33.0",
     "mineflayer-collectblock": "^1.6.0",
     "mineflayer-pathfinder": "^2.4.5",
-    "openai": "^6.9.1"
+    "ollama": "^0.5.9"
   }
 }
