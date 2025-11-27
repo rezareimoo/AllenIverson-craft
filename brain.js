@@ -3,6 +3,7 @@
  */
 
 const { Ollama } = require("ollama");
+const { validateTasks, getCommonNames } = require("./utils/blockNames");
 
 // Initialize Ollama client
 const ollama = new Ollama({
@@ -14,10 +15,37 @@ const ollama = new Ollama({
  * and converts it into an ARRAY of structured JSON tasks for multi-step execution.
  *
  * @param {string} message - The user's chat message
+ * @param {Object} mcData - Optional minecraft-data instance for validation (uses default version if not provided)
  * @returns {Promise<Array|null>} - An array of task objects or null if invalid
  */
-async function processUserRequest(message) {
+async function processUserRequest(message, mcData = null) {
+  // Get common block/item names for the prompt
+  // Use provided mcData or default version
+  let commonNames;
+  let validationData = mcData;
+
+  if (!validationData) {
+    // Use default version for validation if mcData not provided
+    try {
+      validationData = require("minecraft-data")("1.20.1");
+    } catch (e) {
+      console.warn("[Brain] Could not load minecraft-data for validation");
+    }
+  }
+
+  if (validationData) {
+    commonNames = getCommonNames("1.20.1");
+  } else {
+    commonNames = { blocks: [], items: [] };
+  }
+
+  // Build block/item name lists for the prompt
+  const commonBlocksList = commonNames.blocks.slice(0, 100).join(", ");
+  const commonItemsList = commonNames.items.slice(0, 100).join(", ");
+
   const systemPrompt = `You are a Minecraft assistant controlling a bot. Translate user commands into a JSON ARRAY of task steps.
+
+CRITICAL: You MUST use EXACT block/item names from Minecraft. All names use lowercase with underscores (e.g., "oak_log", not "Oak Log" or "oak log").
 
 CRITICAL: You MUST always output a JSON ARRAY starting with [ and ending with ]. Even for single tasks, wrap it in an array. Never output a single object without array brackets.
 
@@ -30,31 +58,41 @@ Available task types:
 - 'collect': Gather blocks/items from the world
 - 'craft': Craft items (bot will handle crafting table automatically)
 - 'place': Place a block from inventory
-- 'move': Navigate to coordinates or a player
+- 'move': Navigate to a block or a player
 - 'follow': Continuously follow a player
+- 'inventory': Report what items are in the bot's inventory
 - 'stop': Stop all actions and clear the queue
 
 TASK FORMATS:
 
 For 'collect' type:
 { "type": "collect", "target": "<block_name>", "count": <number> }
-Block names: oak_log, birch_log, spruce_log, diamond_ore, iron_ore, coal_ore, cobblestone, dirt, sand, etc.
+VALID BLOCK NAMES (use these EXACT names): ${
+    commonBlocksList ||
+    "oak_log, birch_log, spruce_log, diamond_ore, iron_ore, coal_ore, cobblestone, dirt, sand, stone, grass_block, etc."
+  }
 
 For 'craft' type:
 { "type": "craft", "target": "<item_name>", "count": <number> }
-Item names: oak_planks, birch_planks, stick, crafting_table, wooden_pickaxe, stone_pickaxe, iron_pickaxe, diamond_pickaxe, wooden_sword, chest, furnace, torch, etc.
+VALID ITEM NAMES (use these EXACT names): ${
+    commonItemsList ||
+    "oak_planks, birch_planks, stick, crafting_table, wooden_pickaxe, stone_pickaxe, iron_pickaxe, diamond_pickaxe, wooden_sword, chest, furnace, torch, etc."
+  }
 
 For 'place' type:
 { "type": "place", "target": "<block_name>" }
 
-For 'move' type with coordinates:
-{ "type": "move", "x": <number>, "y": <number>, "z": <number> }
+For 'move' type to a block:
+{ "type": "move", "block": "<block_name>", "radius": 3 }
 
 For 'move' type to a player:
 { "type": "move", "player": "<player_name>" }
 
 For 'follow' type:
 { "type": "follow", "player": "<player_name>" }
+
+For 'inventory' type:
+{ "type": "inventory" }
 
 For 'stop' type:
 { "type": "stop" }
@@ -97,10 +135,22 @@ Output:
   { "type": "move", "player": "Steve" }
 ]
 
+Example: User says "go to the crafting table" or "find a crafting table"
+Output:
+[
+  { "type": "move", "block": "crafting_table", "radius": 3 }
+]
+
 Example: User says "stop"
 Output:
 [
   { "type": "stop" }
+]
+
+Example: User says "what's in your inventory" or "show me your inventory" or "what do you have"
+Output:
+[
+  { "type": "inventory" }
 ]
 
 CRITICAL OUTPUT FORMAT:
@@ -128,15 +178,15 @@ Remember: Always return an array, even for single tasks!`;
             "place",
             "move",
             "follow",
+            "inventory",
             "stop",
             "unknown",
           ],
         },
         target: { type: "string" },
         count: { type: "number" },
-        x: { type: "number" },
-        y: { type: "number" },
-        z: { type: "number" },
+        block: { type: "string" },
+        radius: { type: "number" },
         player: { type: "string" },
         reason: { type: "string" },
       },
@@ -219,6 +269,26 @@ Remember: Always return an array, even for single tasks!`;
         return null;
       }
     }
+
+    // Validate and correct block/item names using minecraft-data
+    if (validationData) {
+      const originalTasks = JSON.parse(JSON.stringify(taskArray));
+      taskArray = validateTasks(taskArray, validationData);
+
+      // Log any corrections made
+      for (let i = 0; i < taskArray.length; i++) {
+        if (
+          originalTasks[i].target &&
+          taskArray[i].target !== originalTasks[i].target
+        ) {
+          console.log(
+            `[Brain] Corrected block/item name: "${originalTasks[i].target}" -> "${taskArray[i].target}"`
+          );
+        }
+      }
+    }
+
+    console.log(`[Brain] Final validated tasks: ${JSON.stringify(taskArray)}`);
 
     return taskArray;
   } catch (error) {

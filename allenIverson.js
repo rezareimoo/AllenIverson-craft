@@ -14,6 +14,7 @@ const { handleCraft } = require("./handlers/craft");
 const { handlePlace } = require("./handlers/place");
 const { handleMove } = require("./handlers/move");
 const { handleFollow } = require("./handlers/follow");
+const { handleInventory } = require("./handlers/inventory");
 const { handleStop, handleUnknown } = require("./handlers/stop");
 
 // ============================================================================
@@ -87,6 +88,9 @@ function supervisionLoop() {
           await handleFollow(bot, taskQueue, currentTask);
           // Don't complete - follow stays active until interrupted
           break;
+        case "inventory":
+          handleInventory(bot, taskQueue, currentTask);
+          break;
         case "stop":
           handleStop(bot, taskQueue);
           break;
@@ -123,6 +127,7 @@ bot.on("spawn", () => {
   const defaultMove = new Movements(bot, mcData);
   defaultMove.allowSprinting = true;
   defaultMove.canDig = true;
+  defaultMove.canBuild = true;
   bot.pathfinder.setMovements(defaultMove);
 
   // Increase pathfinder timeout for complex paths (default is 5 seconds)
@@ -139,7 +144,19 @@ bot.on("chat", async (username, message) => {
   // Ignore own messages
   if (username === bot.username) return;
 
-  console.log(`[Chat] ${username}: ${message}`);
+  // Only process messages that start with "Allen" (case-insensitive)
+  const normalizedMessage = message.trim();
+  if (!normalizedMessage.toLowerCase().startsWith("allen")) {
+    return; // Ignore messages that don't start with "Allen"
+  }
+
+  // Extract the actual command (remove "Allen" prefix)
+  const command = normalizedMessage.substring(5).trim(); // Remove "Allen" (5 chars)
+  if (!command) {
+    return; // Ignore if there's no command after "Allen"
+  }
+
+  console.log(`[Chat] ${username}: ${message} (command: "${command}")`);
 
   // INTERRUPT: Stop any current action immediately
   try {
@@ -154,7 +171,7 @@ bot.on("chat", async (username, message) => {
 
   // Process the new request through the LLM
   bot.chat("Planning...");
-  const newTasks = await processUserRequest(message);
+  const newTasks = await processUserRequest(command, mcData);
 
   if (newTasks && newTasks.length > 0) {
     console.log(

@@ -170,7 +170,7 @@ async function handleCraft(bot, mcData, taskQueue, task) {
     }
 
     // Check if we need a crafting table for this recipe
-    // First try without table, then with table
+    // First try without table (inventory crafting), then with table
     let recipes = bot.recipesFor(item.id, null, 1, null);
     let needsCraftingTable = false;
     let craftingTable = null;
@@ -182,10 +182,29 @@ async function handleCraft(bot, mcData, taskQueue, task) {
       maxDistance: 16, // Increased search radius
     });
 
-    if (nearbyTable) {
-      craftingTable = nearbyTable;
-      // Get recipes that work with the crafting table
-      recipes = bot.recipesFor(item.id, null, 1, craftingTable);
+    // First, try to find recipes that work in inventory (2x2 grid)
+    if (!recipes || recipes.length === 0) {
+      // No inventory recipes, try with crafting table if available
+      if (nearbyTable) {
+        recipes = bot.recipesFor(item.id, null, 1, nearbyTable);
+        if (recipes && recipes.length > 0) {
+          craftingTable = nearbyTable;
+        }
+      }
+    } else {
+      // We have inventory recipes, check if they require a table
+      const recipe = recipes[0];
+      if (recipe.requiresTable) {
+        // Recipe requires table, need to use crafting table
+        if (nearbyTable) {
+          recipes = bot.recipesFor(item.id, null, 1, nearbyTable);
+          craftingTable = nearbyTable;
+        } else {
+          // Need crafting table but don't have one nearby
+          recipes = null; // Will trigger the table placement logic below
+        }
+      }
+      // If recipe doesn't require table, keep recipes and craftingTable stays null
     }
 
     if (!recipes || recipes.length === 0) {
@@ -242,6 +261,43 @@ async function handleCraft(bot, mcData, taskQueue, task) {
     const recipe = recipes[0];
     needsCraftingTable = recipe.requiresTable;
 
+    // Ensure craftingTable is set correctly based on recipe requirements
+    if (needsCraftingTable) {
+      if (!nearbyTable) {
+        // Need to place a crafting table
+        const tableInInventory = bot.inventory
+          .items()
+          .find((i) => i.name === "crafting_table");
+        if (tableInInventory) {
+          bot.chat(`I need to place my crafting table first...`);
+          taskQueue.unshift({ type: "place", target: "crafting_table" });
+          return;
+        } else {
+          failTask(
+            bot,
+            taskQueue,
+            `I need a crafting table to craft ${target}, but I don't have one.`
+          );
+          return;
+        }
+      }
+
+      // Set craftingTable for use in bot.craft() later
+      craftingTable = nearbyTable;
+
+      // Always call move to ensure we're close enough - move.js will handle checking distance
+      // If already close, move will complete immediately
+      taskQueue.unshift({
+        type: "move",
+        block: "crafting_table", // Pass block name - move.js will handle finding and moving
+        radius: 3, // Allow pathfinding to stop within 3 blocks
+      });
+      return; // Will retry craft after moving
+    } else {
+      // Recipe doesn't require table - ensure craftingTable is null for inventory crafting
+      craftingTable = null;
+    }
+
     // Analyze what ingredients we're missing
     const missingIngredients = analyzeMissingIngredients(
       mcData,
@@ -277,34 +333,15 @@ async function handleCraft(bot, mcData, taskQueue, task) {
       }
     }
 
-    // Handle crafting table requirement
-    if (needsCraftingTable && !craftingTable) {
-      if (nearbyTable) {
-        craftingTable = nearbyTable;
-        bot.chat(`Using nearby crafting table...`);
-      } else {
-        // This shouldn't happen if recipe analysis worked, but handle it
-        const tableInInventory = bot.inventory
-          .items()
-          .find((i) => i.name === "crafting_table");
-        if (tableInInventory) {
-          bot.chat(`I need to place my crafting table first...`);
-          taskQueue.unshift({ type: "place", target: "crafting_table" });
-          return;
-        } else {
-          failTask(
-            bot,
-            taskQueue,
-            `I need a crafting table to craft ${target}, but I don't have one.`
-          );
-          return;
-        }
-      }
+    // Log what type of crafting we're doing
+    if (craftingTable) {
+      bot.chat(`Crafting ${count} ${target} at crafting table...`);
+    } else {
+      bot.chat(`Crafting ${count} ${target} in inventory...`);
     }
 
-    bot.chat(`Crafting ${count} ${target}...`);
-
     // Perform the crafting
+    // For inventory crafting, pass null. For table crafting, pass the block.
     await bot.craft(recipe, count, craftingTable);
 
     completeCurrentTask(bot, taskQueue, `Crafted ${count} ${target}!`);
