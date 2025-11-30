@@ -22,6 +22,7 @@ const { handleMove } = require("./handlers/move");
 const { handleFollow } = require("./handlers/follow");
 const { handleInventory } = require("./handlers/inventory");
 const { handleStop, handleUnknown } = require("./handlers/stop");
+const { handleSmelt } = require("./handlers/smelt");
 const { botState } = require("./state/botState");
 const { syncQueue, removeTaskAtIndex, clearQueue } = require("./utils/queue");
 const { getCollectibleBlocks } = require("./utils/blockNames");
@@ -404,6 +405,9 @@ function supervisionLoop() {
           break;
         case "craft":
           await handleCraft(bot, mcData, taskQueue, currentTask);
+          break;
+        case "smelt":
+          await handleSmelt(bot, mcData, taskQueue, currentTask);
           break;
         case "place":
           await handlePlace(bot, taskQueue, currentTask, mcData);

@@ -2,7 +2,25 @@
  * Recipe validation and lookup utilities using minecraft-data
  */
 
-const { ITEM_TO_BLOCK_SOURCE } = require("../config/constants");
+const { ITEM_TO_BLOCK_SOURCE, SMELTABLE_ITEMS, FUEL_ITEMS } = require("../config/constants");
+
+/**
+ * Checks if an item is obtained through smelting
+ * @param {string} itemName - The item to check
+ * @returns {Object|null} - Smelt info { input, fuelPerItem } or null
+ */
+function getSmeltInfo(itemName) {
+  return SMELTABLE_ITEMS[itemName] || null;
+}
+
+/**
+ * Checks if an item is smeltable (can be obtained via smelting)
+ * @param {string} itemName - The item to check
+ * @returns {boolean} - True if item is obtained via smelting
+ */
+function isSmeltable(itemName) {
+  return !!SMELTABLE_ITEMS[itemName];
+}
 
 /**
  * Checks if an item has a crafting recipe in minecraft-data
@@ -542,6 +560,55 @@ function resolveCraftingDependencies(
     };
   }
   
+  // Check if this item is obtained through smelting (e.g., iron_ingot from raw_iron)
+  const smeltInfo = getSmeltInfo(itemName);
+  if (smeltInfo) {
+    if (depth === 0) {
+      console.log(`[Resolver] ${itemName} is obtained via smelting ${smeltInfo.input}`);
+    }
+    
+    // Calculate fuel needed (coal smelts 8 items)
+    const fuelNeeded = Math.ceil(needed / 8);
+    
+    // Recursively resolve the input item (e.g., raw_iron)
+    const inputResult = resolveCraftingDependencies(
+      smeltInfo.input,
+      needed,
+      mcData,
+      inventoryMap,
+      new Set(visited),
+      { ...pendingCrafts }
+    );
+    
+    if (!inputResult.feasible) {
+      return inputResult;
+    }
+    tasks.push(...inputResult.tasks);
+    
+    // Add fuel collection if needed (prefer coal)
+    const coalHave = inventoryMap["coal"] || 0;
+    const charcoalHave = inventoryMap["charcoal"] || 0;
+    const totalFuelHave = coalHave + charcoalHave;
+    
+    if (totalFuelHave < fuelNeeded) {
+      const fuelToCollect = fuelNeeded - totalFuelHave;
+      tasks.push({ type: "collect", target: "coal_ore", count: fuelToCollect });
+    }
+    
+    // Add smelt task
+    tasks.push({ 
+      type: "smelt", 
+      input: smeltInfo.input, 
+      output: itemName, 
+      count: needed 
+    });
+    
+    // Track pending
+    pendingCrafts[itemName] = (pendingCrafts[itemName] || 0) + needed;
+    
+    return { feasible: true, tasks };
+  }
+  
   // Check if this is a raw material (no recipe)
   if (isRawMaterial(itemName, mcData)) {
     const collectTarget = getCollectibleBlock(itemName, mcData);
@@ -633,32 +700,52 @@ function resolveCraftingDependencies(
 }
 
 /**
- * Merges and deduplicates tasks (combines multiple collects/crafts of same item)
+ * Merges and deduplicates tasks (combines multiple collects/crafts/smelts of same item)
  * @param {Array} tasks - Array of tasks to merge
  * @returns {Array} - Merged task array
  */
 function mergeTasks(tasks) {
   const collectMap = {};
   const craftMap = {};
+  const smeltMap = {}; // key: "input->output", value: { input, output, count }
   const otherTasks = [];
   
-  // Group collect and craft tasks
+  // Group collect, craft, and smelt tasks
   for (const task of tasks) {
     if (task.type === "collect") {
       collectMap[task.target] = (collectMap[task.target] || 0) + task.count;
     } else if (task.type === "craft") {
       craftMap[task.target] = (craftMap[task.target] || 0) + task.count;
+    } else if (task.type === "smelt") {
+      const key = `${task.input}->${task.output}`;
+      if (!smeltMap[key]) {
+        smeltMap[key] = { input: task.input, output: task.output, count: 0 };
+      }
+      smeltMap[key].count += task.count;
     } else {
       otherTasks.push(task);
     }
   }
   
-  // Build merged task list: collects first, then crafts in order
+  // Build merged task list: collects first, then smelts, then crafts in order
   const merged = [];
   
   // Add all collect tasks first
   for (const [target, count] of Object.entries(collectMap)) {
     merged.push({ type: "collect", target, count });
+  }
+  
+  // Add smelt tasks (after collection, before crafting)
+  const seenSmelts = new Set();
+  for (const task of tasks) {
+    if (task.type === "smelt") {
+      const key = `${task.input}->${task.output}`;
+      if (!seenSmelts.has(key)) {
+        seenSmelts.add(key);
+        const smeltInfo = smeltMap[key];
+        merged.push({ type: "smelt", input: smeltInfo.input, output: smeltInfo.output, count: smeltInfo.count });
+      }
+    }
   }
   
   // Add craft tasks in dependency order (preserve original order for crafts)
@@ -708,6 +795,8 @@ module.exports = {
   formatRecipesForPrompt,
   validateCraftRequest,
   isRawMaterial,
+  isSmeltable,
+  getSmeltInfo,
   getCollectibleBlock,
   resolveCraftingDependencies,
   resolveAllDependencies,

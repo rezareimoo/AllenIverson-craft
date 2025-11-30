@@ -329,6 +329,7 @@ body {
 
 .mc-task__type--collect { background: var(--mc-grass-dark); }
 .mc-task__type--craft { background: #B87333; }
+.mc-task__type--smelt { background: #FF6600; }
 .mc-task__type--place { background: var(--mc-dirt); }
 .mc-task__type--move { background: #4488CC; }
 .mc-task__type--follow { background: #8844CC; }

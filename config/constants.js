@@ -103,7 +103,85 @@ const ITEM_TO_RAW_MATERIAL = {
   crafting_table: { craft: "oak_planks", craftCount: 4, ratio: 1 },
 };
 
+/**
+ * Maps smelted items to their input items and default fuel.
+ * Used by the dependency resolver to queue smelting tasks.
+ * 
+ * Format: outputItem -> { input: inputItem, fuelPerItem: fuelNeeded }
+ * fuelPerItem is how many items one piece of coal can smelt (coal smelts 8 items)
+ */
+const SMELTABLE_ITEMS = {
+  // Ingots from raw ores
+  iron_ingot: { input: "raw_iron", fuelPerItem: 1/8 },
+  gold_ingot: { input: "raw_gold", fuelPerItem: 1/8 },
+  copper_ingot: { input: "raw_copper", fuelPerItem: 1/8 },
+  
+  // Ingots from ore blocks (silk touch)
+  // iron_ingot: { input: "iron_ore", fuelPerItem: 1/8 }, // raw_iron is more common
+  
+  // Netherite
+  netherite_scrap: { input: "ancient_debris", fuelPerItem: 1/8 },
+  
+  // Glass and terracotta
+  glass: { input: "sand", fuelPerItem: 1/8 },
+  terracotta: { input: "clay", fuelPerItem: 1/8 }, // Actually clay_ball makes brick
+  brick: { input: "clay_ball", fuelPerItem: 1/8 },
+  nether_brick: { input: "netherrack", fuelPerItem: 1/8 },
+  
+  // Stone variants
+  stone: { input: "cobblestone", fuelPerItem: 1/8 },
+  smooth_stone: { input: "stone", fuelPerItem: 1/8 },
+  smooth_sandstone: { input: "sandstone", fuelPerItem: 1/8 },
+  smooth_red_sandstone: { input: "red_sandstone", fuelPerItem: 1/8 },
+  smooth_quartz: { input: "quartz_block", fuelPerItem: 1/8 },
+  smooth_basalt: { input: "basalt", fuelPerItem: 1/8 },
+  cracked_stone_bricks: { input: "stone_bricks", fuelPerItem: 1/8 },
+  cracked_deepslate_bricks: { input: "deepslate_bricks", fuelPerItem: 1/8 },
+  cracked_deepslate_tiles: { input: "deepslate_tiles", fuelPerItem: 1/8 },
+  cracked_nether_bricks: { input: "nether_bricks", fuelPerItem: 1/8 },
+  cracked_polished_blackstone_bricks: { input: "polished_blackstone_bricks", fuelPerItem: 1/8 },
+  deepslate: { input: "cobbled_deepslate", fuelPerItem: 1/8 },
+  
+  // Food
+  cooked_beef: { input: "beef", fuelPerItem: 1/8 },
+  cooked_porkchop: { input: "porkchop", fuelPerItem: 1/8 },
+  cooked_chicken: { input: "chicken", fuelPerItem: 1/8 },
+  cooked_mutton: { input: "mutton", fuelPerItem: 1/8 },
+  cooked_rabbit: { input: "rabbit", fuelPerItem: 1/8 },
+  cooked_cod: { input: "cod", fuelPerItem: 1/8 },
+  cooked_salmon: { input: "salmon", fuelPerItem: 1/8 },
+  baked_potato: { input: "potato", fuelPerItem: 1/8 },
+  dried_kelp: { input: "kelp", fuelPerItem: 1/8 },
+  
+  // Charcoal (alternative fuel source)
+  charcoal: { input: "oak_log", fuelPerItem: 1/8 }, // Any log works
+  
+  // Dyes
+  green_dye: { input: "cactus", fuelPerItem: 1/8 },
+  lime_dye: { input: "sea_pickle", fuelPerItem: 1/8 },
+  
+  // Misc
+  sponge: { input: "wet_sponge", fuelPerItem: 1/8 },
+  popped_chorus_fruit: { input: "chorus_fruit", fuelPerItem: 1/8 },
+};
+
+/**
+ * Default fuel items in order of preference (most common/efficient first)
+ */
+const FUEL_ITEMS = [
+  { name: "coal", burnTime: 8 },        // Smelts 8 items
+  { name: "charcoal", burnTime: 8 },    // Smelts 8 items
+  { name: "oak_log", burnTime: 1.5 },   // Smelts 1.5 items (any log)
+  { name: "oak_planks", burnTime: 1.5 },// Smelts 1.5 items (any planks)
+  { name: "stick", burnTime: 0.5 },     // Smelts 0.5 items
+  { name: "coal_block", burnTime: 80 }, // Smelts 80 items
+  { name: "lava_bucket", burnTime: 100 },// Smelts 100 items
+  { name: "blaze_rod", burnTime: 12 },  // Smelts 12 items
+];
+
 module.exports = {
   ITEM_TO_BLOCK_SOURCE,
   ITEM_TO_RAW_MATERIAL,
+  SMELTABLE_ITEMS,
+  FUEL_ITEMS,
 };

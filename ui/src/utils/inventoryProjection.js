@@ -68,6 +68,23 @@ export function applyTaskToInventory(inventoryMap, task, recipes = {}) {
       }
       break;
       
+    case 'smelt':
+      // Subtract input items, add output items
+      if (task.input && task.output && task.count) {
+        // Remove input items
+        inventoryMap[task.input] = Math.max(0, (inventoryMap[task.input] || 0) - task.count);
+        // Add output items (1:1 ratio for smelting)
+        inventoryMap[task.output] = (inventoryMap[task.output] || 0) + task.count;
+        // Subtract fuel (approximately - coal smelts 8 items)
+        const fuelNeeded = Math.ceil(task.count / 8);
+        if (inventoryMap['coal'] >= fuelNeeded) {
+          inventoryMap['coal'] = Math.max(0, inventoryMap['coal'] - fuelNeeded);
+        } else if (inventoryMap['charcoal'] >= fuelNeeded) {
+          inventoryMap['charcoal'] = Math.max(0, inventoryMap['charcoal'] - fuelNeeded);
+        }
+      }
+      break;
+      
     case 'place':
       // Remove placed block from inventory
       if (task.target) {
