@@ -1,20 +1,27 @@
 {
   "name": "alleniverson-craft",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "description": "Minecraft AI Agent with LLM Integration and Web UI",
+  "main": "allenIverson.js",
   "scripts": {
+    "start": "node allenIverson.js",
+    "dev": "node allenIverson.js",
+    "ui:dev": "cd ui && npm run dev",
+    "ui:build": "cd ui && npm run build",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "cors": "^2.8.5",
     "dotenv": "^17.2.3",
+    "express": "^4.18.2",
     "minecraft-data": "^3.69.0",
     "mineflayer": "^4.33.0",
     "mineflayer-collectblock": "^1.6.0",
     "mineflayer-pathfinder": "^2.4.5",
-    "ollama": "^0.5.9"
+    "ollama": "^0.5.9",
+    "socket.io": "^4.7.2"
   }
 }

@@ -1,0 +1,662 @@
+/* Minecraft-Themed UI Styles */
+
+/* CSS Variables - Minecraft Color Palette */
+:root {
+  /* Core Colors */
+  --mc-dirt: #8B5A2B;
+  --mc-dirt-dark: #6B4423;
+  --mc-grass: #5D8731;
+  --mc-grass-dark: #4A6B27;
+  --mc-stone: #7D7D7D;
+  --mc-stone-dark: #5A5A5A;
+  --mc-cobble: #6B6B6B;
+  --mc-inventory-bg: #C6C6C6;
+  --mc-inventory-slot: #8B8B8B;
+  --mc-inventory-slot-hover: #A0A0A0;
+  
+  /* UI Colors */
+  --mc-text: #3F3F3F;
+  --mc-text-light: #FFFFFF;
+  --mc-text-shadow: #3F3F3F;
+  --mc-border: #373737;
+  --mc-border-light: #FFFFFF;
+  --mc-border-highlight: #5A5A5A;
+  
+  /* Status Colors */
+  --mc-success: #55FF55;
+  --mc-error: #FF5555;
+  --mc-warning: #FFAA00;
+  --mc-info: #55FFFF;
+  --mc-running: #AA00FF;
+  
+  /* Enchantment Glow */
+  --mc-enchant-1: #8040C0;
+  --mc-enchant-2: #A060E0;
+  
+  /* Background Pattern */
+  --mc-bg-dark: #1D1D1D;
+  --mc-bg-pattern: #2D2D2D;
+}
+
+/* Reset & Base */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  font-size: 16px;
+}
+
+body {
+  font-family: 'VT323', monospace;
+  background-color: var(--mc-bg-dark);
+  color: var(--mc-text-light);
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+/* Minecraft Dirt Background Pattern */
+.mc-background {
+  background: 
+    linear-gradient(135deg, var(--mc-bg-pattern) 25%, transparent 25%),
+    linear-gradient(225deg, var(--mc-bg-pattern) 25%, transparent 25%),
+    linear-gradient(45deg, var(--mc-bg-pattern) 25%, transparent 25%),
+    linear-gradient(315deg, var(--mc-bg-pattern) 25%, var(--mc-bg-dark) 25%);
+  background-size: 20px 20px;
+  background-position: 10px 0, 10px 0, 0 0, 0 0;
+}
+
+/* Typography */
+.mc-title {
+  font-family: 'Press Start 2P', cursive;
+  font-size: 1.5rem;
+  color: var(--mc-text-light);
+  text-shadow: 
+    3px 3px 0 var(--mc-text-shadow),
+    -1px -1px 0 var(--mc-border);
+  letter-spacing: 2px;
+}
+
+.mc-subtitle {
+  font-family: 'Press Start 2P', cursive;
+  font-size: 0.75rem;
+  color: var(--mc-grass);
+  text-shadow: 2px 2px 0 var(--mc-text-shadow);
+}
+
+.mc-text {
+  font-family: 'VT323', monospace;
+  font-size: 1.25rem;
+  color: var(--mc-text-light);
+}
+
+.mc-text-small {
+  font-family: 'VT323', monospace;
+  font-size: 1rem;
+}
+
+/* Minecraft Button Style */
+.mc-button {
+  font-family: 'VT323', monospace;
+  font-size: 1.25rem;
+  padding: 8px 16px;
+  border: 3px solid;
+  border-color: var(--mc-border-light) var(--mc-border) var(--mc-border) var(--mc-border-light);
+  background: linear-gradient(to bottom, var(--mc-inventory-bg) 0%, var(--mc-inventory-slot) 100%);
+  color: var(--mc-text);
+  cursor: pointer;
+  text-shadow: 1px 1px 0 var(--mc-border-light);
+  transition: all 0.1s ease;
+  image-rendering: pixelated;
+}
+
+.mc-button:hover {
+  background: linear-gradient(to bottom, #D6D6D6 0%, #A0A0A0 100%);
+  border-color: var(--mc-border-light) var(--mc-border-highlight) var(--mc-border-highlight) var(--mc-border-light);
+}
+
+.mc-button:active {
+  border-color: var(--mc-border) var(--mc-border-light) var(--mc-border-light) var(--mc-border);
+  background: linear-gradient(to bottom, var(--mc-inventory-slot) 0%, var(--mc-inventory-bg) 100%);
+}
+
+.mc-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.mc-button--primary {
+  background: linear-gradient(to bottom, var(--mc-grass) 0%, var(--mc-grass-dark) 100%);
+  color: var(--mc-text-light);
+  text-shadow: 1px 1px 0 var(--mc-grass-dark);
+}
+
+.mc-button--primary:hover {
+  background: linear-gradient(to bottom, #6D9741 0%, #5A7B37 100%);
+}
+
+.mc-button--danger {
+  background: linear-gradient(to bottom, #AA3333 0%, #882222 100%);
+  color: var(--mc-text-light);
+  text-shadow: 1px 1px 0 #661111;
+}
+
+.mc-button--danger:hover {
+  background: linear-gradient(to bottom, #BB4444 0%, #993333 100%);
+}
+
+.mc-button--small {
+  font-size: 1rem;
+  padding: 4px 8px;
+}
+
+/* Minecraft Panel/Container */
+.mc-panel {
+  background: var(--mc-inventory-bg);
+  border: 4px solid;
+  border-color: var(--mc-border-light) var(--mc-border) var(--mc-border) var(--mc-border-light);
+  padding: 16px;
+  box-shadow: 
+    inset 2px 2px 0 rgba(255,255,255,0.3),
+    inset -2px -2px 0 rgba(0,0,0,0.3);
+}
+
+.mc-panel--dark {
+  background: var(--mc-stone-dark);
+  color: var(--mc-text-light);
+}
+
+.mc-panel__header {
+  font-family: 'VT323', monospace;
+  font-size: 1.5rem;
+  color: var(--mc-text);
+  padding-bottom: 12px;
+  border-bottom: 2px solid var(--mc-border);
+  margin-bottom: 12px;
+}
+
+/* Minecraft Input */
+.mc-input {
+  font-family: 'VT323', monospace;
+  font-size: 1.25rem;
+  padding: 8px 12px;
+  border: 3px solid;
+  border-color: var(--mc-border) var(--mc-border-light) var(--mc-border-light) var(--mc-border);
+  background: var(--mc-text-light);
+  color: var(--mc-text);
+  width: 100%;
+  outline: none;
+}
+
+.mc-input:focus {
+  border-color: var(--mc-grass) var(--mc-grass-dark) var(--mc-grass-dark) var(--mc-grass);
+  box-shadow: 0 0 0 2px var(--mc-grass);
+}
+
+.mc-input::placeholder {
+  color: var(--mc-stone);
+}
+
+/* Minecraft Select/Dropdown */
+.mc-select {
+  font-family: 'VT323', monospace;
+  font-size: 1.25rem;
+  padding: 8px 32px 8px 12px;
+  border: 3px solid;
+  border-color: var(--mc-border) var(--mc-border-light) var(--mc-border-light) var(--mc-border);
+  background: var(--mc-text-light);
+  color: var(--mc-text);
+  width: 100%;
+  outline: none;
+  cursor: pointer;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%233F3F3F' d='M2 4l4 4 4-4z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+}
+
+.mc-select:focus {
+  border-color: var(--mc-grass) var(--mc-grass-dark) var(--mc-grass-dark) var(--mc-grass);
+}
+
+/* Inventory Slot */
+.mc-slot {
+  width: 48px;
+  height: 48px;
+  background: var(--mc-inventory-slot);
+  border: 2px solid;
+  border-color: var(--mc-border) var(--mc-border-light) var(--mc-border-light) var(--mc-border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  image-rendering: pixelated;
+}
+
+.mc-slot:hover {
+  background: var(--mc-inventory-slot-hover);
+}
+
+.mc-slot__count {
+  position: absolute;
+  bottom: 2px;
+  right: 4px;
+  font-family: 'VT323', monospace;
+  font-size: 1rem;
+  color: var(--mc-text-light);
+  text-shadow: 1px 1px 0 var(--mc-text-shadow);
+}
+
+.mc-slot__icon {
+  width: 32px;
+  height: 32px;
+  font-size: 0.75rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  word-break: break-word;
+  color: var(--mc-text);
+}
+
+/* Inventory Grid */
+.mc-inventory-grid {
+  display: grid;
+  grid-template-columns: repeat(9, 48px);
+  gap: 4px;
+  padding: 8px;
+  background: var(--mc-stone-dark);
+  border: 2px solid var(--mc-border);
+}
+
+/* Task Queue Item */
+.mc-task {
+  background: var(--mc-inventory-bg);
+  border: 3px solid;
+  border-color: var(--mc-border-light) var(--mc-border) var(--mc-border) var(--mc-border-light);
+  padding: 12px 16px;
+  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  position: relative;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.mc-task:hover {
+  transform: translateX(4px);
+}
+
+.mc-task--running {
+  animation: enchant-glow 2s ease-in-out infinite;
+  border-color: var(--mc-enchant-1);
+}
+
+.mc-task--dragging {
+  opacity: 0.8;
+  transform: scale(1.02);
+  box-shadow: 0 8px 16px rgba(0,0,0,0.4);
+}
+
+@keyframes enchant-glow {
+  0%, 100% {
+    box-shadow: 
+      0 0 10px var(--mc-enchant-1),
+      0 0 20px var(--mc-enchant-2),
+      inset 0 0 10px rgba(128, 64, 192, 0.2);
+    border-color: var(--mc-enchant-1);
+  }
+  50% {
+    box-shadow: 
+      0 0 20px var(--mc-enchant-2),
+      0 0 40px var(--mc-enchant-1),
+      inset 0 0 20px rgba(160, 96, 224, 0.3);
+    border-color: var(--mc-enchant-2);
+  }
+}
+
+.mc-task__type {
+  font-family: 'Press Start 2P', cursive;
+  font-size: 0.6rem;
+  padding: 4px 8px;
+  background: var(--mc-stone);
+  color: var(--mc-text-light);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.mc-task__type--collect { background: var(--mc-grass-dark); }
+.mc-task__type--craft { background: #B87333; }
+.mc-task__type--place { background: var(--mc-dirt); }
+.mc-task__type--move { background: #4488CC; }
+.mc-task__type--follow { background: #8844CC; }
+.mc-task__type--inventory { background: #888888; }
+.mc-task__type--stop { background: #CC4444; }
+
+.mc-task__details {
+  flex: 1;
+  font-family: 'VT323', monospace;
+  font-size: 1.25rem;
+  color: var(--mc-text);
+}
+
+.mc-task__remove {
+  width: 28px;
+  height: 28px;
+  border: 2px solid;
+  border-color: var(--mc-border-light) var(--mc-border) var(--mc-border) var(--mc-border-light);
+  background: #AA3333;
+  color: var(--mc-text-light);
+  font-family: 'VT323', monospace;
+  font-size: 1.25rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.mc-task__remove:hover {
+  background: #CC4444;
+}
+
+.mc-task__drag-handle {
+  cursor: grab;
+  color: var(--mc-stone);
+  font-size: 1.5rem;
+  user-select: none;
+}
+
+.mc-task__drag-handle:active {
+  cursor: grabbing;
+}
+
+/* Status Badge */
+.mc-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  font-family: 'VT323', monospace;
+  font-size: 1rem;
+  border: 2px solid var(--mc-border);
+}
+
+.mc-badge--success {
+  background: var(--mc-success);
+  color: var(--mc-text);
+}
+
+.mc-badge--error {
+  background: var(--mc-error);
+  color: var(--mc-text-light);
+}
+
+.mc-badge--warning {
+  background: var(--mc-warning);
+  color: var(--mc-text);
+}
+
+.mc-badge--info {
+  background: var(--mc-info);
+  color: var(--mc-text);
+}
+
+.mc-badge--running {
+  background: var(--mc-running);
+  color: var(--mc-text-light);
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+/* Feasibility Indicator */
+.mc-feasibility {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border: 2px solid var(--mc-border);
+  font-family: 'VT323', monospace;
+  font-size: 1.1rem;
+}
+
+.mc-feasibility--feasible {
+  background: rgba(85, 255, 85, 0.2);
+  border-color: var(--mc-success);
+  color: var(--mc-success);
+}
+
+.mc-feasibility--not-feasible {
+  background: rgba(255, 85, 85, 0.2);
+  border-color: var(--mc-error);
+  color: var(--mc-error);
+}
+
+.mc-feasibility__icon {
+  font-size: 1.5rem;
+}
+
+.mc-feasibility__missing {
+  margin-top: 4px;
+  font-size: 1rem;
+  color: var(--mc-warning);
+}
+
+/* Scrollbar Styling */
+::-webkit-scrollbar {
+  width: 12px;
+  height: 12px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--mc-stone-dark);
+  border: 2px solid var(--mc-border);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--mc-inventory-slot);
+  border: 2px solid var(--mc-border);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--mc-inventory-slot-hover);
+}
+
+/* Layout */
+.app-container {
+  display: grid;
+  grid-template-columns: 1fr 400px;
+  grid-template-rows: auto 1fr;
+  gap: 16px;
+  min-height: 100vh;
+  padding: 16px;
+  max-width: 1600px;
+  margin: 0 auto;
+}
+
+.app-header {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 24px;
+  background: var(--mc-dirt);
+  border: 4px solid;
+  border-color: var(--mc-dirt) var(--mc-dirt-dark) var(--mc-dirt-dark) var(--mc-dirt);
+  box-shadow: 
+    inset 0 2px 0 rgba(255,255,255,0.2),
+    inset 0 -2px 0 rgba(0,0,0,0.3);
+}
+
+.app-header__status {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.status-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid var(--mc-border);
+}
+
+.status-dot--connected {
+  background: var(--mc-success);
+  box-shadow: 0 0 8px var(--mc-success);
+}
+
+.status-dot--disconnected {
+  background: var(--mc-error);
+  box-shadow: 0 0 8px var(--mc-error);
+}
+
+.main-content {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* Empty State */
+.mc-empty-state {
+  text-align: center;
+  padding: 40px 20px;
+  color: var(--mc-stone);
+  font-family: 'VT323', monospace;
+  font-size: 1.5rem;
+}
+
+.mc-empty-state__icon {
+  font-size: 3rem;
+  margin-bottom: 16px;
+  opacity: 0.5;
+}
+
+/* Autocomplete Dropdown */
+.mc-autocomplete {
+  position: relative;
+}
+
+.mc-autocomplete__dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  max-height: 200px;
+  overflow-y: auto;
+  background: var(--mc-text-light);
+  border: 3px solid;
+  border-color: var(--mc-border) var(--mc-border-light) var(--mc-border-light) var(--mc-border);
+  border-top: none;
+  z-index: 100;
+}
+
+.mc-autocomplete__item {
+  padding: 8px 12px;
+  font-family: 'VT323', monospace;
+  font-size: 1.1rem;
+  color: var(--mc-text);
+  cursor: pointer;
+  border-bottom: 1px solid var(--mc-inventory-slot);
+}
+
+.mc-autocomplete__item:hover,
+.mc-autocomplete__item--highlighted {
+  background: var(--mc-grass);
+  color: var(--mc-text-light);
+}
+
+.mc-autocomplete__item:last-child {
+  border-bottom: none;
+}
+
+/* Toggle Switch */
+.mc-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.mc-toggle__track {
+  width: 48px;
+  height: 24px;
+  background: var(--mc-stone-dark);
+  border: 2px solid var(--mc-border);
+  position: relative;
+  transition: background 0.2s ease;
+}
+
+.mc-toggle__track--active {
+  background: var(--mc-grass-dark);
+}
+
+.mc-toggle__thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  background: var(--mc-inventory-bg);
+  border: 2px solid var(--mc-border);
+  transition: left 0.2s ease;
+}
+
+.mc-toggle__track--active .mc-toggle__thumb {
+  left: 26px;
+}
+
+.mc-toggle__label {
+  font-family: 'VT323', monospace;
+  font-size: 1.1rem;
+}
+
+/* Form Group */
+.mc-form-group {
+  margin-bottom: 16px;
+}
+
+.mc-form-group__label {
+  display: block;
+  font-family: 'VT323', monospace;
+  font-size: 1.1rem;
+  color: var(--mc-text);
+  margin-bottom: 6px;
+}
+
+/* Responsive */
+@media (max-width: 1200px) {
+  .app-container {
+    grid-template-columns: 1fr;
+  }
+  
+  .mc-inventory-grid {
+    grid-template-columns: repeat(6, 48px);
+  }
+}
+
+@media (max-width: 768px) {
+  .mc-title {
+    font-size: 1rem;
+  }
+  
+  .mc-inventory-grid {
+    grid-template-columns: repeat(4, 48px);
+  }
+  
+  .app-header {
+    flex-direction: column;
+    gap: 12px;
+    text-align: center;
+  }
+}
+
