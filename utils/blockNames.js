@@ -4,6 +4,108 @@
  */
 
 /**
+ * Quick check if a name is a valid block in minecraft-data
+ * @param {string} name - The block name to check
+ * @param {Object} mcData - Minecraft data instance
+ * @returns {boolean} - True if valid block name
+ */
+function isValidBlockName(name, mcData) {
+  if (!name || !mcData) return false;
+  return !!mcData.blocksByName[name.toLowerCase().trim()];
+}
+
+/**
+ * Quick check if a name is a valid item in minecraft-data
+ * @param {string} name - The item name to check
+ * @param {Object} mcData - Minecraft data instance
+ * @returns {boolean} - True if valid item name
+ */
+function isValidItemName(name, mcData) {
+  if (!name || !mcData) return false;
+  return !!mcData.itemsByName[name.toLowerCase().trim()];
+}
+
+/**
+ * Quick check if a name is either a valid block or item
+ * @param {string} name - The name to check
+ * @param {Object} mcData - Minecraft data instance
+ * @returns {boolean} - True if valid block or item name
+ */
+function isValidName(name, mcData) {
+  return isValidBlockName(name, mcData) || isValidItemName(name, mcData);
+}
+
+/**
+ * Gets a list of all collectible blocks (blocks that can be mined)
+ * @param {Object} mcData - Minecraft data instance
+ * @returns {Array<string>} - Array of block names
+ */
+function getCollectibleBlocks(mcData) {
+  if (!mcData) return [];
+
+  // Filter blocks that are typically collectible (solid, not technical)
+  const excludePatterns = [
+    "air",
+    "void",
+    "barrier",
+    "command_block",
+    "structure",
+    "jigsaw",
+    "light",
+    "debug",
+    "piston_head",
+    "moving_piston",
+    "fire",
+    "soul_fire",
+    "nether_portal",
+    "end_portal",
+    "end_gateway",
+    "frosted_ice",
+    "bubble_column",
+  ];
+
+  return Object.keys(mcData.blocksByName).filter((name) => {
+    const block = mcData.blocksByName[name];
+    // Filter out non-solid/technical blocks
+    if (!block || block.hardness === undefined || block.hardness < 0) {
+      return false;
+    }
+    // Filter out excluded patterns
+    return !excludePatterns.some(
+      (pattern) => name.includes(pattern) || name === pattern
+    );
+  });
+}
+
+/**
+ * Suggests similar block/item names for user feedback
+ * @param {string} inputName - The invalid name
+ * @param {Object} mcData - Minecraft data instance
+ * @param {number} maxSuggestions - Maximum suggestions to return
+ * @returns {Array<string>} - Array of similar valid names
+ */
+function getSuggestions(inputName, mcData, maxSuggestions = 3) {
+  if (!inputName || !mcData) return [];
+
+  const normalized = inputName.toLowerCase().trim();
+  const allNames = [
+    ...Object.keys(mcData.blocksByName || {}),
+    ...Object.keys(mcData.itemsByName || {}),
+  ];
+
+  // Score names by similarity
+  const scored = allNames
+    .map((name) => ({
+      name,
+      distance: levenshteinDistance(normalized, name.toLowerCase()),
+    }))
+    .filter((item) => item.distance <= 5) // Only consider reasonably close matches
+    .sort((a, b) => a.distance - b.distance);
+
+  return scored.slice(0, maxSuggestions).map((item) => item.name);
+}
+
+/**
  * Calculates Levenshtein distance between two strings
  * Used for fuzzy matching of block names
  */
@@ -199,5 +301,10 @@ module.exports = {
   validateTasks,
   findClosestName,
   getCommonNames,
+  isValidBlockName,
+  isValidItemName,
+  isValidName,
+  getCollectibleBlocks,
+  getSuggestions,
 };
 

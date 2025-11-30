@@ -5,6 +5,10 @@
 const { GoalNear } = require("mineflayer-pathfinder").goals;
 const { completeCurrentTask, failTask } = require("../utils/queue");
 const mcData = require("minecraft-data");
+const {
+  validateAndCorrectName,
+  getSuggestions,
+} = require("../utils/blockNames");
 
 /**
  * Finds a player target and returns movement info
@@ -49,10 +53,28 @@ function findBlockTarget(bot, blockSpec, radius = 2) {
     );
   }
 
+  // Get minecraft-data for this version
+  const data = mcData(bot.version);
+
+  // Validate and correct the block name
+  const validation = validateAndCorrectName(blockName, data);
+  if (!validation.valid) {
+    const suggestions = getSuggestions(blockName, data);
+    const suggestionMsg =
+      suggestions.length > 0
+        ? ` Did you mean: ${suggestions.join(", ")}?`
+        : "";
+    throw new Error(`Unknown block type: ${blockName}.${suggestionMsg}`);
+  }
+  if (validation.corrected !== blockName) {
+    console.log(
+      `[Move] Auto-corrected "${blockName}" to "${validation.corrected}"`
+    );
+    blockName = validation.corrected;
+  }
+
   bot.chat(`Searching for the nearest ${blockName}...`);
 
-  // Get block ID from minecraft-data
-  const data = mcData(bot.version);
   const blockData = data.blocksByName[blockName];
 
   if (!blockData) {

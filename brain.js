@@ -3,7 +3,15 @@
  */
 
 const { Ollama } = require("ollama");
-const { validateTasks, getCommonNames } = require("./utils/blockNames");
+const {
+  validateTasks,
+  getCommonNames,
+  getCollectibleBlocks,
+} = require("./utils/blockNames");
+const {
+  formatRecipesForPrompt,
+  getCommonCraftableItems,
+} = require("./utils/recipes");
 
 // Initialize Ollama client
 const ollama = new Ollama({
@@ -42,6 +50,15 @@ async function processUserRequest(message, mcData = null) {
   // Build block/item name lists for the prompt
   const commonBlocksList = commonNames.blocks.slice(0, 100).join(", ");
   const commonItemsList = commonNames.items.slice(0, 100).join(", ");
+
+  // Generate dynamic recipe information from minecraft-data
+  let recipeInfo = "";
+  let craftableItemsList = "";
+  if (validationData) {
+    recipeInfo = formatRecipesForPrompt(validationData, 35);
+    const craftables = getCommonCraftableItems(validationData, 50);
+    craftableItemsList = craftables.map((c) => c.name).join(", ");
+  }
 
   const systemPrompt = `You are a Minecraft assistant controlling a bot. Translate user commands into a JSON ARRAY of task steps.
 
@@ -97,21 +114,17 @@ For 'inventory' type:
 For 'stop' type:
 { "type": "stop" }
 
-CRAFTING RECIPES (use these exact item names):
-- oak_planks: requires 1 oak_log (makes 4)
-- birch_planks: requires 1 birch_log (makes 4)
-- spruce_planks: requires 1 spruce_log (makes 4)
-- stick: requires 2 planks (makes 4)
-- crafting_table: requires 4 planks
-- wooden_pickaxe: requires 3 planks + 2 sticks (needs crafting_table)
-- wooden_sword: requires 2 planks + 1 stick (needs crafting_table)
-- wooden_axe: requires 3 planks + 2 sticks (needs crafting_table)
-- stone_pickaxe: requires 3 cobblestone + 2 sticks (needs crafting_table)
-- iron_pickaxe: requires 3 iron_ingot + 2 sticks (needs crafting_table)
-- diamond_pickaxe: requires 3 diamond + 2 sticks (needs crafting_table)
-- furnace: requires 8 cobblestone (needs crafting_table)
-- chest: requires 8 planks (needs crafting_table)
-- torch: requires 1 coal + 1 stick (makes 4)
+CRAFTING RECIPES (generated from Minecraft data - use exact item names):
+${recipeInfo || `- oak_planks: 1 oak_log
+- stick: 2 oak_planks
+- crafting_table: 4 oak_planks
+- wooden_pickaxe: 3 oak_planks + 2 stick (needs crafting_table)
+- stone_pickaxe: 3 cobblestone + 2 stick (needs crafting_table)
+- furnace: 8 cobblestone (needs crafting_table)
+- chest: 8 oak_planks (needs crafting_table)`}
+
+CRAFTABLE ITEMS (verified from Minecraft data):
+${craftableItemsList || "oak_planks, stick, crafting_table, wooden_pickaxe, wooden_sword, wooden_axe, stone_pickaxe, furnace, chest, torch"}
 
 MULTI-STEP PLANNING:
 For complex requests, ALWAYS break them into sequential steps. The bot executes tasks in order.

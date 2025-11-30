@@ -78,7 +78,7 @@ function supervisionLoop() {
           await handleCraft(bot, mcData, taskQueue, currentTask);
           break;
         case "place":
-          await handlePlace(bot, taskQueue, currentTask);
+          await handlePlace(bot, taskQueue, currentTask, mcData);
           break;
         case "move":
           await handleMove(bot, taskQueue, currentTask);
@@ -125,6 +125,8 @@ bot.on("spawn", () => {
 
   // Configure pathfinder movements
   const defaultMove = new Movements(bot, mcData);
+  defaultMove.allow1by1towers = false;
+  defaultMove.scafoldingCost = 6.0;
   defaultMove.allowSprinting = true;
   defaultMove.canDig = true;
   defaultMove.canBuild = true;

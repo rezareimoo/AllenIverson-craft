@@ -5,6 +5,11 @@
 const { ITEM_TO_RAW_MATERIAL } = require("../config/constants");
 const { completeCurrentTask, failTask } = require("../utils/queue");
 const { getInventoryCount } = require("../utils/inventory");
+const {
+  validateAndCorrectName,
+  getSuggestions,
+} = require("../utils/blockNames");
+const { validateCraftRequest } = require("../utils/recipes");
 
 /**
  * Analyzes a recipe and returns missing ingredients
@@ -159,9 +164,38 @@ function createGatherTasks(mcData, bot, missingItems) {
  * @param {Object} task - { type: 'craft', target: string, count: number }
  */
 async function handleCraft(bot, mcData, taskQueue, task) {
-  const { target, count = 1 } = task;
+  let { target, count = 1 } = task;
 
   try {
+    // Validate and correct the target name using minecraft-data
+    const nameValidation = validateAndCorrectName(target, mcData);
+    if (!nameValidation.valid) {
+      const suggestions = getSuggestions(target, mcData);
+      const suggestionMsg =
+        suggestions.length > 0
+          ? ` Did you mean: ${suggestions.join(", ")}?`
+          : "";
+      failTask(
+        bot,
+        taskQueue,
+        `I don't know what "${target}" is.${suggestionMsg}`
+      );
+      return;
+    }
+    if (nameValidation.corrected !== target) {
+      console.log(
+        `[Craft] Auto-corrected "${target}" to "${nameValidation.corrected}"`
+      );
+      target = nameValidation.corrected;
+    }
+
+    // Validate that this item can be crafted
+    const craftValidation = validateCraftRequest(target, mcData);
+    if (!craftValidation.valid) {
+      failTask(bot, taskQueue, craftValidation.message);
+      return;
+    }
+
     // Find the item in minecraft-data
     const item = mcData.itemsByName[target];
     if (!item) {
@@ -285,14 +319,19 @@ async function handleCraft(bot, mcData, taskQueue, task) {
       // Set craftingTable for use in bot.craft() later
       craftingTable = nearbyTable;
 
-      // Always call move to ensure we're close enough - move.js will handle checking distance
-      // If already close, move will complete immediately
-      taskQueue.unshift({
-        type: "move",
-        block: "crafting_table", // Pass block name - move.js will handle finding and moving
-        radius: 3, // Allow pathfinding to stop within 3 blocks
-      });
-      return; // Will retry craft after moving
+      // Check if we're already close enough to the crafting table (within 4 blocks)
+      const distToTable = bot.entity.position.distanceTo(nearbyTable.position);
+      if (distToTable > 4) {
+        // Only move if actually far away - prevents infinite loop
+        bot.chat(`Moving closer to crafting table...`);
+        taskQueue.unshift({
+          type: "move",
+          block: "crafting_table",
+          radius: 3,
+        });
+        return; // Will retry craft after moving
+      }
+      // Otherwise continue with crafting - we're close enough
     } else {
       // Recipe doesn't require table - ensure craftingTable is null for inventory crafting
       craftingTable = null;

@@ -5,6 +5,10 @@
 const { ITEM_TO_BLOCK_SOURCE } = require("../config/constants");
 const { completeCurrentTask, failTask } = require("../utils/queue");
 const { getInventoryCount } = require("../utils/inventory");
+const {
+  validateAndCorrectName,
+  getSuggestions,
+} = require("../utils/blockNames");
 
 /**
  * Handles the 'collect' task - finds and gathers blocks
@@ -15,12 +19,34 @@ const { getInventoryCount } = require("../utils/inventory");
  * @param {Object} task - { type: 'collect', target: string, count: number }
  */
 async function handleCollect(bot, mcData, taskQueue, task) {
-  const { target, count = 1 } = task;
+  let { target, count = 1 } = task;
 
   console.log(`[Collect] === Starting collect task ===`);
   console.log(`[Collect] Target: ${target}, Count: ${count}`);
 
   try {
+    // Validate and correct the target name using minecraft-data
+    const validation = validateAndCorrectName(target, mcData);
+    if (!validation.valid) {
+      const suggestions = getSuggestions(target, mcData);
+      const suggestionMsg =
+        suggestions.length > 0
+          ? ` Did you mean: ${suggestions.join(", ")}?`
+          : "";
+      failTask(
+        bot,
+        taskQueue,
+        `I don't know what "${target}" is.${suggestionMsg}`
+      );
+      return;
+    }
+    if (validation.corrected !== target) {
+      console.log(
+        `[Collect] Auto-corrected "${target}" to "${validation.corrected}"`
+      );
+      target = validation.corrected;
+    }
+
     // Check if bot already has enough items in inventory
     const currentCount = getInventoryCount(bot, target);
     if (currentCount >= count) {

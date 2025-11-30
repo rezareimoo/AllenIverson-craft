@@ -4,6 +4,10 @@
 
 const { Vec3 } = require("vec3");
 const { completeCurrentTask, failTask } = require("../utils/queue");
+const {
+  validateAndCorrectName,
+  getSuggestions,
+} = require("../utils/blockNames");
 
 /**
  * Handles the 'place' task - places a block from inventory
@@ -11,10 +15,34 @@ const { completeCurrentTask, failTask } = require("../utils/queue");
  * @param {Array} taskQueue - The task queue array
  * @param {Object} task - { type: 'place', target: string }
  */
-async function handlePlace(bot, taskQueue, task) {
-  const { target } = task;
+async function handlePlace(bot, taskQueue, task, mcData) {
+  let { target } = task;
 
   try {
+    // Validate and correct the target name using minecraft-data (if available)
+    if (mcData) {
+      const validation = validateAndCorrectName(target, mcData);
+      if (!validation.valid) {
+        const suggestions = getSuggestions(target, mcData);
+        const suggestionMsg =
+          suggestions.length > 0
+            ? ` Did you mean: ${suggestions.join(", ")}?`
+            : "";
+        failTask(
+          bot,
+          taskQueue,
+          `I don't know what "${target}" is.${suggestionMsg}`
+        );
+        return;
+      }
+      if (validation.corrected !== target) {
+        console.log(
+          `[Place] Auto-corrected "${target}" to "${validation.corrected}"`
+        );
+        target = validation.corrected;
+      }
+    }
+
     // Find the item in inventory
     const item = bot.inventory.items().find((i) => i.name === target);
 
