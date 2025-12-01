@@ -28,6 +28,8 @@ function formatTaskDetails(task) {
       return `${format(task.target)} × ${task.count || 1}`;
     case 'craft':
       return `${format(task.target)} × ${task.count || 1}`;
+    case 'smelt':
+      return `${format(task.input)} → ${format(task.output)} × ${task.count || 1}`;
     case 'place':
       return format(task.target);
     case 'move':

@@ -6,11 +6,34 @@ import { inventoryToMap, checkCraftFeasibility } from '../utils/inventoryProject
 const TASK_TYPES = [
   { value: 'collect', label: 'Collect', description: 'Gather blocks/items from the world' },
   { value: 'craft', label: 'Craft', description: 'Craft items using recipes' },
+  { value: 'smelt', label: 'Smelt', description: 'Smelt items in a furnace' },
   { value: 'place', label: 'Place', description: 'Place a block from inventory' },
   { value: 'move', label: 'Move', description: 'Navigate to a block or player' },
   { value: 'follow', label: 'Follow', description: 'Continuously follow a player' },
   { value: 'inventory', label: 'Inventory', description: 'Show current inventory' },
   { value: 'stop', label: 'Stop', description: 'Stop all actions' },
+];
+
+// Common smelting recipes (input -> output)
+const SMELT_RECIPES = [
+  { input: 'raw_iron', output: 'iron_ingot', label: 'Iron Ingot (from Raw Iron)' },
+  { input: 'raw_gold', output: 'gold_ingot', label: 'Gold Ingot (from Raw Gold)' },
+  { input: 'raw_copper', output: 'copper_ingot', label: 'Copper Ingot (from Raw Copper)' },
+  { input: 'sand', output: 'glass', label: 'Glass (from Sand)' },
+  { input: 'cobblestone', output: 'stone', label: 'Stone (from Cobblestone)' },
+  { input: 'stone', output: 'smooth_stone', label: 'Smooth Stone (from Stone)' },
+  { input: 'clay_ball', output: 'brick', label: 'Brick (from Clay Ball)' },
+  { input: 'netherrack', output: 'nether_brick', label: 'Nether Brick (from Netherrack)' },
+  { input: 'oak_log', output: 'charcoal', label: 'Charcoal (from Log)' },
+  { input: 'beef', output: 'cooked_beef', label: 'Cooked Beef (from Beef)' },
+  { input: 'porkchop', output: 'cooked_porkchop', label: 'Cooked Porkchop (from Porkchop)' },
+  { input: 'chicken', output: 'cooked_chicken', label: 'Cooked Chicken (from Chicken)' },
+  { input: 'mutton', output: 'cooked_mutton', label: 'Cooked Mutton (from Mutton)' },
+  { input: 'cod', output: 'cooked_cod', label: 'Cooked Cod (from Cod)' },
+  { input: 'salmon', output: 'cooked_salmon', label: 'Cooked Salmon (from Salmon)' },
+  { input: 'potato', output: 'baked_potato', label: 'Baked Potato (from Potato)' },
+  { input: 'cactus', output: 'green_dye', label: 'Green Dye (from Cactus)' },
+  { input: 'ancient_debris', output: 'netherite_scrap', label: 'Netherite Scrap (from Ancient Debris)' },
 ];
 
 /**
@@ -36,6 +59,7 @@ export function TaskBuilder({
   const [radius, setRadius] = useState(3);
   const [feasibility, setFeasibility] = useState(null);
   const [isLoadingRecipe, setIsLoadingRecipe] = useState(false);
+  const [smeltRecipe, setSmeltRecipe] = useState(''); // For smelt task
 
   // Check craft feasibility when target changes
   useEffect(() => {
@@ -88,6 +112,7 @@ export function TaskBuilder({
     setCount(1);
     setPlayerName('');
     setFeasibility(null);
+    setSmeltRecipe('');
   }, [taskType]);
 
   const handleSubmit = useCallback((e) => {
@@ -105,6 +130,15 @@ export function TaskBuilder({
       case 'craft':
         if (!target) return;
         task.target = target;
+        task.count = Math.max(1, parseInt(count) || 1);
+        break;
+      
+      case 'smelt':
+        if (!smeltRecipe) return;
+        const selectedSmelt = SMELT_RECIPES.find(r => `${r.input}->${r.output}` === smeltRecipe);
+        if (!selectedSmelt) return;
+        task.input = selectedSmelt.input;
+        task.output = selectedSmelt.output;
         task.count = Math.max(1, parseInt(count) || 1);
         break;
         
@@ -219,6 +253,44 @@ export function TaskBuilder({
                 )}
               </div>
             )}
+          </>
+        );
+      
+      case 'smelt':
+        return (
+          <>
+            <div className="mc-form-group">
+              <label className="mc-form-group__label">Smelting Recipe</label>
+              <select
+                className="mc-select"
+                value={smeltRecipe}
+                onChange={(e) => setSmeltRecipe(e.target.value)}
+              >
+                <option value="">Select what to smelt...</option>
+                {SMELT_RECIPES.map((recipe) => (
+                  <option 
+                    key={`${recipe.input}->${recipe.output}`} 
+                    value={`${recipe.input}->${recipe.output}`}
+                  >
+                    {recipe.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="mc-form-group">
+              <label className="mc-form-group__label">Amount</label>
+              <input
+                type="number"
+                className="mc-input"
+                value={count}
+                onChange={(e) => setCount(e.target.value)}
+                min="1"
+                max="64"
+              />
+            </div>
+            <div className="mc-text-small" style={{ color: 'var(--mc-stone)', marginBottom: '8px' }}>
+              Bot will find/craft a furnace and collect fuel automatically.
+            </div>
           </>
         );
         
@@ -351,6 +423,8 @@ export function TaskBuilder({
       case 'craft':
       case 'place':
         return !!target;
+      case 'smelt':
+        return !!smeltRecipe;
       case 'move':
         return moveTarget === 'block' ? !!target : !!playerName;
       case 'follow':

@@ -73,12 +73,15 @@ Each task object must have a 'type' field.
 
 Available task types:
 - 'collect': Gather blocks/items from the world
-- 'craft': Craft items (bot will handle crafting table automatically)
+- 'craft': Craft items (bot will handle crafting table and smelting automatically)
+- 'smelt': Smelt items in a furnace (bot will handle furnace placement automatically)
 - 'place': Place a block from inventory
 - 'move': Navigate to a block or a player
 - 'follow': Continuously follow a player
 - 'inventory': Report what items are in the bot's inventory
 - 'stop': Stop all actions and clear the queue
+
+IMPORTANT: For items that require smelting (like iron_ingot, gold_ingot), the 'craft' command will automatically handle smelting. You don't need to explicitly use 'smelt' for recipes - just use 'craft' for the final item.
 
 TASK FORMATS:
 
@@ -95,6 +98,18 @@ VALID ITEM NAMES (use these EXACT names): ${
     commonItemsList ||
     "oak_planks, birch_planks, stick, crafting_table, wooden_pickaxe, stone_pickaxe, iron_pickaxe, diamond_pickaxe, wooden_sword, chest, furnace, torch, etc."
   }
+
+For 'smelt' type (use for direct smelting requests):
+{ "type": "smelt", "input": "<input_item>", "output": "<output_item>", "count": <number> }
+SMELTING RECIPES:
+- iron_ingot: raw_iron (from iron_ore)
+- gold_ingot: raw_gold (from gold_ore)
+- copper_ingot: raw_copper (from copper_ore)
+- glass: sand
+- stone: cobblestone
+- cooked_beef: beef
+- cooked_porkchop: porkchop
+- charcoal: oak_log (or any log)
 
 For 'place' type:
 { "type": "place", "target": "<block_name>" }
@@ -188,6 +203,7 @@ Remember: Always return an array, even for single tasks!`;
           enum: [
             "collect",
             "craft",
+            "smelt",
             "place",
             "move",
             "follow",
@@ -202,6 +218,8 @@ Remember: Always return an array, even for single tasks!`;
         radius: { type: "number" },
         player: { type: "string" },
         reason: { type: "string" },
+        input: { type: "string" },  // For smelt tasks
+        output: { type: "string" }, // For smelt tasks
       },
       required: ["type"],
     },
