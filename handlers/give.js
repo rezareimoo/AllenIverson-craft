@@ -9,6 +9,8 @@ const {
   validateAndCorrectName,
   getSuggestions,
 } = require("../utils/blockNames");
+const { gotoRobust } = require("../utils/pathing");
+const { botState } = require("../state/botState");
 
 /**
  * @param {Object} bot
@@ -77,7 +79,13 @@ async function handleGive(bot, mcData, taskQueue, task, cancelGen) {
 
     bot.chat(`Bringing ${count} ${target} to ${player}...`);
     const pos = targetPlayer.entity.position;
-    await bot.pathfinder.goto(new GoalNear(pos.x, pos.y, pos.z, 2));
+    await gotoRobust(bot, new GoalNear(pos.x, pos.y, pos.z, 2), {
+      mcData: mcData || botState.getMcData(),
+      taskQueue,
+      assertNotCancelled: () => assertNotCancelled(cancelGen),
+      preferNoBuild: false,
+      maxAttempts: 3,
+    });
     assertNotCancelled(cancelGen);
 
     // Re-check player still nearby

@@ -3,7 +3,7 @@
 
 require("dotenv").config();
 const mineflayer = require("mineflayer");
-const { pathfinder, Movements } = require("mineflayer-pathfinder");
+const { pathfinder } = require("mineflayer-pathfinder");
 const collectBlock = require("mineflayer-collectblock").plugin;
 const express = require("express");
 const { createServer } = require("http");
@@ -29,6 +29,7 @@ const {
   clearQueue,
   failTask,
 } = require("./utils/queue");
+const { applyPathingMovements } = require("./utils/pathing");
 const { getCollectibleBlocks } = require("./utils/blockNames");
 const {
   getCommonCraftableItems,
@@ -322,6 +323,20 @@ function supervisionLoop() {
   const currentTask = taskQueue[0];
   const cancelGen = botState.getCancelGeneration();
 
+  // Refresh pathing so scaffolding respects materials needed by remaining steps
+  if (mcData) {
+    try {
+      applyPathingMovements(bot, mcData, taskQueue, {
+        allowBuild: true,
+        strictNoBuild: !!currentTask.noBuild,
+        allowParkour: false,
+        allowTowers: true,
+      });
+    } catch (e) {
+      console.warn("[Supervisor] Pathing refresh failed:", e.message);
+    }
+  }
+
   botState.setExecuting(true);
   botState.setMode("working");
   console.log(`[Supervisor] Executing: ${JSON.stringify(currentTask)}`);
@@ -431,14 +446,13 @@ bot.on("spawn", () => {
   botState.setConnected(true);
   console.log(`[Bot] Minecraft version: ${bot.version}`);
 
-  const defaultMove = new Movements(bot, mcData);
-  defaultMove.allow1by1towers = false;
-  defaultMove.scafoldingCost = 6.0;
-  defaultMove.allowSprinting = true;
-  defaultMove.canDig = true;
-  defaultMove.canBuild = true;
-  bot.pathfinder.setMovements(defaultMove);
-  bot.pathfinder.thinkTimeout = 10000;
+  // Pathing: scaffold+tower with safe surplus filler (dirt), not craft mats
+  applyPathingMovements(bot, mcData, taskQueue, {
+    allowBuild: true,
+    allowParkour: false,
+    allowTowers: true,
+    thinkTimeout: 15000,
+  });
 
   // Only one supervision timer across respawns
   if (supervisionTimer) clearInterval(supervisionTimer);

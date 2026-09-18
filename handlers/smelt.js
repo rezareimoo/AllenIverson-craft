@@ -175,11 +175,12 @@ async function handleSmelt(bot, mcData, taskQueue, task, cancelGen) {
     );
     if (distToFurnace > 4) {
       bot.chat("Moving to furnace...");
-      // Move to the specific furnace type we found
+      // Move to the specific furnace type we found — no scaffolding with craft mats
       taskQueue.unshift({
         type: "move",
         block: furnaceBlockName.replace(/^lit_/, ""),
         radius: 3,
+        noBuild: true,
       });
       syncQueue(taskQueue);
       return;

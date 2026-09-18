@@ -294,6 +294,7 @@ async function handleCraft(bot, mcData, taskQueue, task, cancelGen) {
           type: "move",
           block: "crafting_table",
           radius: 3,
+          noBuild: true,
         });
         syncQueue(taskQueue);
         return; // Will retry craft after moving

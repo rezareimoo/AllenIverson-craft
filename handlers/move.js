@@ -1,5 +1,5 @@
 /**
- * Movement task handler
+ * Movement task handler — robust pathing that won't spend craft materials
  */
 
 const { GoalNear } = require("mineflayer-pathfinder").goals;
@@ -8,20 +8,18 @@ const {
   failTask,
   assertNotCancelled,
 } = require("../utils/queue");
-const mcData = require("minecraft-data");
+const mcDataLib = require("minecraft-data");
 const {
   validateAndCorrectName,
   getSuggestions,
 } = require("../utils/blockNames");
 const { botState } = require("../state/botState");
+const {
+  gotoRobust,
+  shouldPreferNoBuild,
+  applyPathingMovements,
+} = require("../utils/pathing");
 
-/**
- * Finds a player target and returns movement info
- * @param {Object} bot - The mineflayer bot instance
- * @param {string} playerName - Name of the player to find
- * @returns {{ pos: Object, range: number, successMessage: string }}
- * @throws {Error} If player cannot be found
- */
 function findPlayerTarget(bot, playerName) {
   const targetPlayer = bot.players[playerName];
   if (!targetPlayer || !targetPlayer.entity) {
@@ -37,16 +35,7 @@ function findPlayerTarget(bot, playerName) {
   };
 }
 
-/**
- * Finds a block target and returns movement info
- * @param {Object} bot - The mineflayer bot instance
- * @param {string|Object} blockSpec - Block name string or object with name property
- * @param {number} radius - How close to get to the block (default 3)
- * @returns {{ pos: Object, range: number, successMessage: string }}
- * @throws {Error} If block cannot be found
- */
 function findBlockTarget(bot, blockSpec, radius = 2) {
-  // Extract block name - support both string and object formats
   let blockName;
   if (typeof blockSpec === "string") {
     blockName = blockSpec;
@@ -58,10 +47,8 @@ function findBlockTarget(bot, blockSpec, radius = 2) {
     );
   }
 
-  // Get minecraft-data for this version
-  const data = mcData(bot.version);
+  const data = mcDataLib(bot.version);
 
-  // Validate and correct the block name
   const validation = validateAndCorrectName(blockName, data);
   if (!validation.valid) {
     const suggestions = getSuggestions(blockName, data);
@@ -81,23 +68,25 @@ function findBlockTarget(bot, blockSpec, radius = 2) {
   bot.chat(`Searching for the nearest ${blockName}...`);
 
   const blockData = data.blocksByName[blockName];
-
   if (!blockData) {
     throw new Error(`Unknown block type: ${blockName}`);
   }
 
-  // Find the nearest block
-  const targetBlock = bot.findBlock({
+  // Prefer closest reachable-looking candidate among several nearby matches
+  const positions = bot.findBlocks({
     matching: blockData.id,
     maxDistance: 64,
-    count: 1,
+    count: 8,
   });
 
-  if (!targetBlock) {
+  if (!positions.length) {
     throw new Error(`Couldn't find any ${blockName} nearby!`);
   }
 
-  const pos = targetBlock.position;
+  const botPos = bot.entity.position;
+  positions.sort((a, b) => botPos.distanceTo(a) - botPos.distanceTo(b));
+
+  const pos = positions[0];
   bot.chat(
     `Found a ${blockName} at ${pos.x.toFixed(1)}, ${pos.y.toFixed(
       1
@@ -108,25 +97,19 @@ function findBlockTarget(bot, blockSpec, radius = 2) {
     pos,
     range: radius,
     successMessage: `I have arrived at the ${blockName}! Ready to interact.`,
+    candidates: positions,
   };
 }
 
-/**
- * Handles the 'move' task - navigates to a block or a player
- * @param {Object} bot - The mineflayer bot instance
- * @param {Array} taskQueue - The task queue array
- * @param {Object} task - { type: 'move', block?: string|object, player? }
- */
 async function handleMove(bot, taskQueue, task, cancelGen) {
-  const MAX_RETRIES = 2;
   const gen = cancelGen ?? botState.getCancelGeneration();
+  const mcData = botState.getMcData() || mcDataLib(bot.version);
 
   try {
     assertNotCancelled(gen);
     let target;
 
     if (task.player) {
-      // Briefly reacquire player if out of view
       let targetPlayer = bot.players[task.player];
       if (!targetPlayer?.entity) {
         for (let i = 0; i < 4; i++) {
@@ -138,7 +121,7 @@ async function handleMove(bot, taskQueue, task, cancelGen) {
       }
       target = findPlayerTarget(bot, task.player);
     } else if (task.block) {
-      target = findBlockTarget(bot, task.block, task.radius);
+      target = findBlockTarget(bot, task.block, task.radius ?? 3);
     } else {
       failTask(
         bot,
@@ -148,20 +131,35 @@ async function handleMove(bot, taskQueue, task, cancelGen) {
       return;
     }
 
-    let { pos, range, successMessage } = target;
+    let { pos, range, successMessage, candidates } = target;
 
-    // For players, refresh position right before pathing
     if (task.player && bot.players[task.player]?.entity) {
       pos = bot.players[task.player].entity.position;
     }
 
-    const goal = new GoalNear(pos.x, pos.y, pos.z, range);
+    const preferNoBuild = shouldPreferNoBuild(task);
+    const assertFn = () => assertNotCancelled(gen);
+
+    // Try primary target, then alternate nearby candidates if block move fails
+    const positionsToTry = candidates?.length
+      ? candidates
+      : [pos];
 
     let lastError;
-    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    for (let c = 0; c < positionsToTry.length; c++) {
+      const tryPos = positionsToTry[c];
+      // Slightly larger reach for workstations on later candidates
+      const tryRange = preferNoBuild ? Math.max(range, 3) : range;
+      const goal = new GoalNear(tryPos.x, tryPos.y, tryPos.z, tryRange);
+
       try {
-        assertNotCancelled(gen);
-        await bot.pathfinder.goto(goal);
+        await gotoRobust(bot, goal, {
+          mcData,
+          taskQueue,
+          assertNotCancelled: assertFn,
+          preferNoBuild,
+          maxAttempts: preferNoBuild ? 3 : 3,
+        });
         assertNotCancelled(gen);
         completeCurrentTask(bot, taskQueue, successMessage);
         return;
@@ -169,12 +167,10 @@ async function handleMove(bot, taskQueue, task, cancelGen) {
         if (pathError.cancelled) throw pathError;
         lastError = pathError;
         console.log(
-          `[Move] Pathfinding attempt ${attempt}/${MAX_RETRIES} failed: ${pathError.message}`
+          `[Move] Candidate ${c + 1}/${positionsToTry.length} failed: ${pathError.message}`
         );
-
-        if (attempt < MAX_RETRIES) {
-          bot.chat(`Retrying pathfinding... (attempt ${attempt + 1})`);
-          await new Promise((resolve) => setTimeout(resolve, 500));
+        if (c < positionsToTry.length - 1) {
+          bot.chat(`Trying another path...`);
         }
       }
     }
@@ -187,21 +183,30 @@ async function handleMove(bot, taskQueue, task, cancelGen) {
     }
     console.error("[Move] Error:", error.message);
 
-    // Provide more specific error messages for pathfinding failures
+    // Restore reliable default movements after failure
+    try {
+      applyPathingMovements(bot, mcData, taskQueue, {
+        allowBuild: true,
+        allowParkour: false,
+        allowTowers: true,
+      });
+    } catch (e) {}
+
     let errorMessage = error.message;
     if (
       error.message.includes("path") ||
       error.message.includes("goal") ||
-      error.message.includes("Timeout")
+      error.message.includes("Timeout") ||
+      error.message.includes("Pathfinding")
     ) {
       if (task.block) {
         const blockName =
           typeof task.block === "string"
             ? task.block
             : task.block.name || "block";
-        errorMessage = `Pathfinding failed after ${MAX_RETRIES} attempts, maybe the ${blockName} is unreachable.`;
+        errorMessage = `Couldn't reach the ${blockName} — path blocked or too far.`;
       } else {
-        errorMessage = `Pathfinding failed after ${MAX_RETRIES} attempts, maybe the target is unreachable.`;
+        errorMessage = `Couldn't reach the target — path blocked or too far.`;
       }
     }
 

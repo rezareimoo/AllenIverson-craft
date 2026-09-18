@@ -5,6 +5,7 @@
 const { GoalFollow } = require("mineflayer-pathfinder").goals;
 const { failTask } = require("../utils/queue");
 const { botState } = require("../state/botState");
+const { applyPathingMovements } = require("../utils/pathing");
 
 /**
  * Activates continuous follow mode and removes the follow task from the queue.
@@ -15,6 +16,15 @@ async function handleFollow(bot, taskQueue, task) {
     if (!targetPlayer || !targetPlayer.entity) {
       failTask(bot, taskQueue, `I can't see player "${task.player}".`);
       return;
+    }
+
+    const mcData = botState.getMcData();
+    if (mcData) {
+      applyPathingMovements(bot, mcData, taskQueue, {
+        allowBuild: true,
+        allowParkour: false,
+        allowTowers: true,
+      });
     }
 
     const goal = new GoalFollow(targetPlayer.entity, 3);

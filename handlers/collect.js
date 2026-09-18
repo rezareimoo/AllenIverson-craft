@@ -18,6 +18,7 @@ const {
   getSuggestions,
 } = require("../utils/blockNames");
 const { botState } = require("../state/botState");
+const { applyPathingMovements } = require("../utils/pathing");
 
 /** Pickaxe preference for ore/stone (best first) */
 const PICKAXES = [
@@ -230,6 +231,14 @@ async function handleCollect(bot, mcData, taskQueue, task, cancelGen) {
     );
 
     bot.chat(`Found ${blocks.length} ${blockToMine}. Collecting...`);
+
+    // Don't spend reserved craft materials while pathing to ores
+    applyPathingMovements(bot, mcData, taskQueue, {
+      allowBuild: true,
+      allowParkour: false,
+      allowTowers: true,
+      thinkTimeout: 12000,
+    });
 
     const targetBlocks = blocks.map((pos) => bot.blockAt(pos)).filter(Boolean);
     let collected = 0;
