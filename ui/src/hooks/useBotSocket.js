@@ -18,6 +18,9 @@ export function useBotSocket() {
   const [queue, setQueue] = useState([]);
   const [isExecuting, setIsExecuting] = useState(false);
   const [currentTask, setCurrentTask] = useState(null);
+  const [currentGoal, setCurrentGoal] = useState(null);
+  const [mode, setMode] = useState('idle');
+  const [failureHistory, setFailureHistory] = useState([]);
   const [inventory, setInventory] = useState([]);
   const [lastEvent, setLastEvent] = useState(null);
   
@@ -53,7 +56,9 @@ export function useBotSocket() {
     // Bot status events
     socket.on('bot:status', (data) => {
       console.log('[Socket] Bot status:', data);
-      setBotStatus(data);
+      setBotStatus((prev) => ({ ...prev, ...data }));
+      if (data.mode) setMode(data.mode);
+      if (data.currentGoal !== undefined) setCurrentGoal(data.currentGoal);
     });
 
     // Queue events
@@ -62,6 +67,17 @@ export function useBotSocket() {
       setQueue(data.queue || []);
       setIsExecuting(data.isExecuting || false);
       setCurrentTask(data.currentTask || null);
+      if (data.mode) setMode(data.mode);
+      if (data.currentGoal !== undefined) setCurrentGoal(data.currentGoal);
+      if (data.failureHistory) setFailureHistory(data.failureHistory);
+    });
+
+    socket.on('goal:updated', (data) => {
+      setCurrentGoal(data.goal || null);
+    });
+
+    socket.on('mode:changed', (data) => {
+      setMode(data.mode || 'idle');
     });
 
     // Task lifecycle events
@@ -80,6 +96,12 @@ export function useBotSocket() {
     socket.on('task:failed', (data) => {
       console.log('[Socket] Task failed:', data);
       setLastEvent({ type: 'failed', task: data.task, message: data.message, timestamp: Date.now() });
+      if (data.message) {
+        setFailureHistory((prev) => [
+          { message: data.message, task: data.task, at: Date.now() },
+          ...prev,
+        ].slice(0, 10));
+      }
     });
 
     // Inventory events
@@ -183,7 +205,11 @@ export function useBotSocket() {
         position: data.position,
         health: data.health,
         food: data.food,
+        mode: data.mode,
       });
+      if (data.currentGoal !== undefined) setCurrentGoal(data.currentGoal);
+      if (data.mode) setMode(data.mode);
+      if (data.failureHistory) setFailureHistory(data.failureHistory);
       return data;
     } catch (error) {
       console.error('[API] Failed to fetch status:', error);
@@ -257,6 +283,9 @@ export function useBotSocket() {
     queue,
     isExecuting,
     currentTask,
+    currentGoal,
+    mode,
+    failureHistory,
     
     // Inventory state
     inventory,

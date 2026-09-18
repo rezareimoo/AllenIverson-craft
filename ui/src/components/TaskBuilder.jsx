@@ -7,6 +7,7 @@ const TASK_TYPES = [
   { value: 'collect', label: 'Collect', description: 'Gather blocks/items from the world' },
   { value: 'craft', label: 'Craft', description: 'Craft items using recipes' },
   { value: 'smelt', label: 'Smelt', description: 'Smelt items in a furnace' },
+  { value: 'give', label: 'Give', description: 'Bring / toss items to a player' },
   { value: 'place', label: 'Place', description: 'Place a block from inventory' },
   { value: 'move', label: 'Move', description: 'Navigate to a block or player' },
   { value: 'follow', label: 'Follow', description: 'Continuously follow a player' },
@@ -141,6 +142,13 @@ export function TaskBuilder({
         task.output = selectedSmelt.output;
         task.count = Math.max(1, parseInt(count) || 1);
         break;
+
+      case 'give':
+        if (!target || !playerName) return;
+        task.target = target;
+        task.count = Math.max(1, parseInt(count) || 1);
+        task.player = playerName;
+        break;
         
       case 'place':
         if (!target) return;
@@ -175,7 +183,8 @@ export function TaskBuilder({
     setTarget('');
     setCount(1);
     setPlayerName('');
-  }, [taskType, target, count, moveTarget, playerName, radius, onAddTask]);
+    setSmeltRecipe('');
+  }, [taskType, target, count, moveTarget, playerName, radius, smeltRecipe, onAddTask]);
 
   const getItemsForType = () => {
     switch (taskType) {
@@ -183,6 +192,8 @@ export function TaskBuilder({
         return blocks;
       case 'craft':
         return items;
+      case 'give':
+        return [...new Set([...(items || []), ...(allItems || [])])];
       case 'place':
       case 'move':
         return allItems;
@@ -290,6 +301,57 @@ export function TaskBuilder({
             </div>
             <div className="mc-text-small" style={{ color: 'var(--mc-stone)', marginBottom: '8px' }}>
               Bot will find/craft a furnace and collect fuel automatically.
+            </div>
+          </>
+        );
+
+      case 'give':
+        return (
+          <>
+            <div className="mc-form-group">
+              <label className="mc-form-group__label">Item to Give</label>
+              <BlockItemSelector
+                items={getItemsForType()}
+                value={target}
+                onChange={setTarget}
+                placeholder="Search items..."
+              />
+            </div>
+            <div className="mc-form-group">
+              <label className="mc-form-group__label">Amount</label>
+              <input
+                type="number"
+                className="mc-input"
+                value={count}
+                onChange={(e) => setCount(e.target.value)}
+                min="1"
+                max="64"
+              />
+            </div>
+            <div className="mc-form-group">
+              <label className="mc-form-group__label">Player</label>
+              {players.length > 0 ? (
+                <select
+                  className="mc-select"
+                  value={playerName}
+                  onChange={(e) => setPlayerName(e.target.value)}
+                >
+                  <option value="">Select a player...</option>
+                  {players.map((p) => (
+                    <option key={p.name} value={p.name}>
+                      {p.name} {p.entity ? '(visible)' : '(not visible)'}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <input
+                  type="text"
+                  className="mc-input"
+                  value={playerName}
+                  onChange={(e) => setPlayerName(e.target.value)}
+                  placeholder="Enter player name..."
+                />
+              )}
             </div>
           </>
         );
@@ -425,6 +487,8 @@ export function TaskBuilder({
         return !!target;
       case 'smelt':
         return !!smeltRecipe;
+      case 'give':
+        return !!target && !!playerName;
       case 'move':
         return moveTarget === 'block' ? !!target : !!playerName;
       case 'follow':

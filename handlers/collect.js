@@ -2,30 +2,167 @@
  * Collection task handler
  */
 
-const { ITEM_TO_BLOCK_SOURCE } = require("../config/constants");
-const { completeCurrentTask, failTask } = require("../utils/queue");
+const {
+  ITEM_TO_BLOCK_SOURCE,
+  BLOCK_TO_ITEM_DROP,
+  DEEPSLATE_ORE_VARIANTS,
+} = require("../config/constants");
+const {
+  completeCurrentTask,
+  failTask,
+  assertNotCancelled,
+} = require("../utils/queue");
 const { getInventoryCount } = require("../utils/inventory");
 const {
   validateAndCorrectName,
   getSuggestions,
 } = require("../utils/blockNames");
+const { botState } = require("../state/botState");
+
+/** Pickaxe preference for ore/stone (best first) */
+const PICKAXES = [
+  "netherite_pickaxe",
+  "diamond_pickaxe",
+  "iron_pickaxe",
+  "stone_pickaxe",
+  "golden_pickaxe",
+  "wooden_pickaxe",
+];
+
+const AXES = [
+  "netherite_axe",
+  "diamond_axe",
+  "iron_axe",
+  "stone_axe",
+  "golden_axe",
+  "wooden_axe",
+];
+
+const SHOVELS = [
+  "netherite_shovel",
+  "diamond_shovel",
+  "iron_shovel",
+  "stone_shovel",
+  "golden_shovel",
+  "wooden_shovel",
+];
 
 /**
- * Handles the 'collect' task - finds and gathers blocks
- * Uses progressive distance search and collects one block at a time to avoid pathfinding timeouts
- * @param {Object} bot - The mineflayer bot instance
- * @param {Object} mcData - Minecraft data instance
- * @param {Array} taskQueue - The task queue array
- * @param {Object} task - { type: 'collect', target: string, count: number }
+ * Resolve what block to mine and which inventory item to count.
  */
-async function handleCollect(bot, mcData, taskQueue, task) {
+function resolveCollectTargets(target) {
+  // Item that drops from a different block (coal → coal_ore)
+  if (ITEM_TO_BLOCK_SOURCE[target]) {
+    return {
+      blockToMine: ITEM_TO_BLOCK_SOURCE[target],
+      itemToCount: target,
+    };
+  }
+
+  // Asked for an ore block name but mining drops an item (coal_ore → coal)
+  if (BLOCK_TO_ITEM_DROP[target]) {
+    return {
+      blockToMine: target,
+      itemToCount: BLOCK_TO_ITEM_DROP[target],
+    };
+  }
+
+  return { blockToMine: target, itemToCount: target };
+}
+
+function getBlockIdsToSearch(blockToMine, mcData) {
+  const ids = [];
+  const primary = mcData.blocksByName[blockToMine];
+  if (primary) ids.push(primary.id);
+
+  if (DEEPSLATE_ORE_VARIANTS.includes(blockToMine)) {
+    const deep = mcData.blocksByName[`deepslate_${blockToMine}`];
+    if (deep) ids.push(deep.id);
+  }
+
+  // If mining stone for cobble, also allow cobblestone blocks
+  if (blockToMine === "stone") {
+    const cobble = mcData.blocksByName["cobblestone"];
+    if (cobble) ids.push(cobble.id);
+  }
+
+  return ids;
+}
+
+async function equipBestTool(bot, block) {
+  if (!block) return;
+
+  const name = block.name || "";
+  let tools = PICKAXES;
+
+  if (
+    name.includes("log") ||
+    name.includes("stem") ||
+    name.includes("planks") ||
+    name.includes("wood")
+  ) {
+    tools = AXES;
+  } else if (
+    name.includes("dirt") ||
+    name.includes("sand") ||
+    name.includes("gravel") ||
+    name.includes("clay") ||
+    name.includes("snow")
+  ) {
+    tools = SHOVELS;
+  }
+
+  for (const toolName of tools) {
+    const tool = bot.inventory.items().find((i) => i.name === toolName);
+    if (tool) {
+      try {
+        await bot.equip(tool, "hand");
+        return toolName;
+      } catch (e) {
+        // try next
+      }
+    }
+  }
+
+  // Soft blocks don't need tools
+  const soft = ["dirt", "sand", "gravel", "clay", "grass_block", "snow"];
+  if (soft.some((s) => name.includes(s))) return null;
+
+  // Logs can be punched slowly
+  if (name.includes("log") || name.includes("stem")) return null;
+
+  // Ores / stone without a pickaxe will fail
+  if (
+    name.includes("ore") ||
+    name === "stone" ||
+    name === "cobblestone" ||
+    name.includes("deepslate")
+  ) {
+    const err = new Error("NO_TOOL");
+    err.noTool = true;
+    throw err;
+  }
+
+  return null;
+}
+
+/**
+ * @param {Object} bot
+ * @param {Object} mcData
+ * @param {Array} taskQueue
+ * @param {Object} task
+ * @param {number} [cancelGen]
+ */
+async function handleCollect(bot, mcData, taskQueue, task, cancelGen) {
   let { target, count = 1 } = task;
+  const gen = cancelGen ?? botState.getCancelGeneration();
 
   console.log(`[Collect] === Starting collect task ===`);
   console.log(`[Collect] Target: ${target}, Count: ${count}`);
 
   try {
-    // Validate and correct the target name using minecraft-data
+    assertNotCancelled(gen);
+
     const validation = validateAndCorrectName(target, mcData);
     if (!validation.valid) {
       const suggestions = getSuggestions(target, mcData);
@@ -47,194 +184,137 @@ async function handleCollect(bot, mcData, taskQueue, task) {
       target = validation.corrected;
     }
 
-    // Check if bot already has enough items in inventory
-    const currentCount = getInventoryCount(bot, target);
+    const { blockToMine, itemToCount } = resolveCollectTargets(target);
+    console.log(
+      `[Collect] Mine "${blockToMine}", count inventory item "${itemToCount}"`
+    );
+
+    const currentCount = getInventoryCount(bot, itemToCount);
     if (currentCount >= count) {
-      console.log(
-        `[Collect] Already have ${currentCount} ${target}, need ${count}. Skipping collection.`
-      );
       completeCurrentTask(
         bot,
         taskQueue,
-        `I already have ${currentCount} ${target}!`
+        `I already have ${currentCount} ${itemToCount}!`
       );
       return;
     }
 
     const needed = count - currentCount;
-    console.log(
-      `[Collect] Have ${currentCount}, need ${count}, collecting ${needed} more`
-    );
-
-    // Check if this item needs to be obtained by mining a different block
-    const actualBlockToMine = ITEM_TO_BLOCK_SOURCE[target] || target;
-    if (actualBlockToMine !== target) {
-      console.log(
-        `[Collect] Item "${target}" is obtained by mining "${actualBlockToMine}"`
-      );
-    }
-
-    // Find the block type in minecraft-data
-    const blockType = mcData.blocksByName[actualBlockToMine];
-    if (!blockType) {
-      console.log(
-        `[Collect] ERROR: Block type "${actualBlockToMine}" not found in mcData`
-      );
-      console.log(
-        `[Collect] Available similar blocks:`,
-        Object.keys(mcData.blocksByName)
-          .filter((name) => name.includes(actualBlockToMine.split("_")[0]))
-          .slice(0, 10)
-      );
+    const blockIds = getBlockIdsToSearch(blockToMine, mcData);
+    if (blockIds.length === 0) {
       failTask(bot, taskQueue, `I don't know what "${target}" is.`);
       return;
     }
-    console.log(
-      `[Collect] Block type found: ${blockType.name} (ID: ${blockType.id})`
-    );
 
-    // Log bot position
     const botPos = bot.entity.position;
-    console.log(
-      `[Collect] Bot position: x=${botPos.x.toFixed(1)}, y=${botPos.y.toFixed(
-        1
-      )}, z=${botPos.z.toFixed(1)}`
-    );
-
-    // Find nearby blocks - start with closer range to avoid pathfinding timeouts
-    // Try progressively larger distances if nothing found nearby
     let blocks = [];
     const distances = [16, 32, 48, 64];
 
     for (const maxDist of distances) {
-      console.log(`[Collect] Searching within ${maxDist} blocks...`);
+      assertNotCancelled(gen);
       blocks = bot.findBlocks({
-        matching: blockType.id,
+        matching: blockIds,
         maxDistance: maxDist,
-        count: needed, // Only collect what we need
+        count: Math.max(needed * 2, needed),
       });
-
-      if (blocks.length > 0) {
-        console.log(
-          `[Collect] Found ${blocks.length} ${target} within ${maxDist} blocks`
-        );
-        break;
-      } else {
-        console.log(`[Collect] No ${target} found within ${maxDist} blocks`);
-      }
+      if (blocks.length > 0) break;
     }
 
     if (blocks.length === 0) {
-      console.log(
-        `[Collect] ERROR: No ${target} found within any search distance`
-      );
-      failTask(bot, taskQueue, `I can't find any ${target} nearby.`);
+      failTask(bot, taskQueue, `I can't find any ${blockToMine} nearby.`);
       return;
     }
 
-    // Sort blocks by distance (closest first) to reduce pathfinding issues
-    blocks.sort((a, b) => {
-      const distA = botPos.distanceTo(a);
-      const distB = botPos.distanceTo(b);
-      return distA - distB;
-    });
-
-    // Log closest block info
-    const closestBlock = blocks[0];
-    const closestDist = botPos.distanceTo(closestBlock);
-    console.log(
-      `[Collect] Closest ${target} at: x=${closestBlock.x}, y=${
-        closestBlock.y
-      }, z=${closestBlock.z} (distance: ${closestDist.toFixed(1)})`
+    blocks.sort(
+      (a, b) => botPos.distanceTo(a) - botPos.distanceTo(b)
     );
 
-    bot.chat(`Found ${blocks.length} ${target}. Collecting...`);
+    bot.chat(`Found ${blocks.length} ${blockToMine}. Collecting...`);
 
-    // Get the actual block objects
     const targetBlocks = blocks.map((pos) => bot.blockAt(pos)).filter(Boolean);
-    console.log(`[Collect] Valid block objects: ${targetBlocks.length}`);
-
-    if (targetBlocks.length === 0) {
-      console.log(
-        `[Collect] ERROR: All block positions returned null from bot.blockAt()`
-      );
-      failTask(bot, taskQueue, `Found ${target} but couldn't access them.`);
-      return;
-    }
-
-    // Collect blocks one at a time to handle pathfinding failures gracefully
     let collected = 0;
     let attempted = 0;
+    let toolError = false;
+
     for (const block of targetBlocks) {
-      // Check if we have enough now
-      const currentHave = getInventoryCount(bot, target);
-      if (currentHave >= count) {
-        console.log(
-          `[Collect] Have enough now (${currentHave} >= ${count}), stopping collection`
-        );
-        break;
-      }
+      assertNotCancelled(gen);
+
+      const currentHave = getInventoryCount(bot, itemToCount);
+      if (currentHave >= count) break;
 
       attempted++;
-      console.log(
-        `[Collect] Attempting block ${attempted}/${targetBlocks.length}: ${block.name} at (${block.position.x}, ${block.position.y}, ${block.position.z})`
-      );
-
       try {
-        console.log(`[Collect] Calling collectBlock.collect()...`);
+        await equipBestTool(bot, block);
         await bot.collectBlock.collect(block, {
           ignoreNoPath: false,
-          timeout: 10000, // 10 second timeout per block
+          timeout: 10000,
         });
         collected++;
-        console.log(`[Collect] Successfully collected! (${collected} total)`);
       } catch (collectError) {
+        if (collectError.noTool || collectError.message === "NO_TOOL") {
+          toolError = true;
+          break;
+        }
         console.log(`[Collect] Collection failed: ${collectError.message}`);
-        console.log(
-          `[Collect] Error stack:`,
-          collectError.stack?.split("\n").slice(0, 3).join("\n")
-        );
-
-        // If pathfinding fails for this block, skip it and try the next
         if (
           collectError.message.includes("path") ||
           collectError.message.includes("goal") ||
           collectError.message.includes("Took to long")
         ) {
-          console.log(
-            `[Collect] Pathfinding issue - skipping to next block...`
-          );
           continue;
         }
-        // For other errors, log but continue
-        console.log(`[Collect] Non-pathfinding error - continuing...`);
+        // Wrong tool / harvest harvestable errors
+        if (
+          collectError.message.includes("dig") ||
+          collectError.message.includes("tool") ||
+          collectError.message.includes("harvest")
+        ) {
+          toolError = true;
+          break;
+        }
       }
     }
 
-    const finalCount = getInventoryCount(bot, target);
-    console.log(
-      `[Collect] === Collection complete: ${collected}/${attempted} blocks, now have ${finalCount} total ===`
-    );
+    assertNotCancelled(gen);
 
-    if (collected > 0 || finalCount >= count) {
-      completeCurrentTask(
-        bot,
-        taskQueue,
-        `Collected ${collected} ${target}! Now have ${finalCount} total.`
-      );
-    } else {
-      console.log(`[Collect] ERROR: Failed to collect any blocks`);
+    const finalCount = getInventoryCount(bot, itemToCount);
+
+    if (toolError && finalCount < count) {
       failTask(
         bot,
         taskQueue,
-        `Couldn't reach any ${target}. They might be blocked.`
+        `I need a better tool to mine ${blockToMine}.`,
+        { fatal: false }
+      );
+      return;
+    }
+
+    if (finalCount >= count) {
+      completeCurrentTask(
+        bot,
+        taskQueue,
+        `Collected ${itemToCount}! Now have ${finalCount} total.`
+      );
+    } else if (finalCount > currentCount) {
+      // Partial progress — still fail so retry/replan can finish the rest
+      failTask(
+        bot,
+        taskQueue,
+        `Only got ${finalCount}/${count} ${itemToCount}. Retrying...`
+      );
+    } else {
+      failTask(
+        bot,
+        taskQueue,
+        `Couldn't reach any ${blockToMine}. They might be blocked.`
       );
     }
   } catch (error) {
+    if (error.cancelled) {
+      console.log("[Collect] Cancelled");
+      return;
+    }
     console.error("[Collect] FATAL ERROR:", error.message);
-    console.error("[Collect] Error stack:", error.stack);
-
-    // If it's a pathfinding timeout, give a helpful message
     if (
       error.message.includes("path") ||
       error.message.includes("goal") ||
@@ -243,7 +323,7 @@ async function handleCollect(bot, mcData, taskQueue, task) {
       failTask(
         bot,
         taskQueue,
-        `Can't find a path to ${target}. Try moving closer or to open ground.`
+        `Can't find a path to ${target}. Try moving closer.`
       );
     } else {
       failTask(bot, taskQueue, `Failed to collect ${target}: ${error.message}`);
@@ -253,4 +333,5 @@ async function handleCollect(bot, mcData, taskQueue, task) {
 
 module.exports = {
   handleCollect,
+  resolveCollectTargets,
 };

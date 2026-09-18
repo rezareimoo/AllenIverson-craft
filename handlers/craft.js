@@ -2,7 +2,12 @@
  * Crafting task handler
  */
 
-const { completeCurrentTask, failTask, syncQueue } = require("../utils/queue");
+const {
+  completeCurrentTask,
+  failTask,
+  syncQueue,
+  assertNotCancelled,
+} = require("../utils/queue");
 const { getInventoryCount } = require("../utils/inventory");
 const {
   validateAndCorrectName,
@@ -12,6 +17,7 @@ const {
   validateCraftRequest,
   resolveAllDependencies,
 } = require("../utils/recipes");
+const { botState } = require("../state/botState");
 
 /**
  * Builds an inventory map from the bot's current inventory
@@ -35,10 +41,13 @@ function buildInventoryMap(bot) {
  * @param {Array} taskQueue - The task queue array
  * @param {Object} task - { type: 'craft', target: string, count: number }
  */
-async function handleCraft(bot, mcData, taskQueue, task) {
+async function handleCraft(bot, mcData, taskQueue, task, cancelGen) {
   let { target, count = 1 } = task;
+  const gen = cancelGen ?? botState.getCancelGeneration();
 
   try {
+    assertNotCancelled(gen);
+
     // Validate and correct the target name using minecraft-data
     const nameValidation = validateAndCorrectName(target, mcData);
     if (!nameValidation.valid) {
@@ -325,15 +334,18 @@ async function handleCraft(bot, mcData, taskQueue, task) {
     }
 
     // Perform the crafting
-    // recipeExecutions = number of times to run the recipe
     await bot.craft(recipe, recipeExecutions, craftingTable);
+    assertNotCancelled(gen);
 
     const actualOutput = recipeExecutions * outputPerRecipe;
     completeCurrentTask(bot, taskQueue, `Crafted ${actualOutput} ${target}!`);
   } catch (error) {
+    if (error.cancelled) {
+      console.log("[Craft] Cancelled");
+      return;
+    }
     console.error("[Craft] Craft error:", error.message);
 
-    // Check if error is about missing materials (try to recover)
     if (
       error.message.includes("missing") ||
       error.message.includes("ingredient")

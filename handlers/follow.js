@@ -1,16 +1,13 @@
 /**
- * Follow task handler
+ * Follow task handler — sets follow MODE once (not re-dispatched every tick)
  */
 
 const { GoalFollow } = require("mineflayer-pathfinder").goals;
 const { failTask } = require("../utils/queue");
+const { botState } = require("../state/botState");
 
 /**
- * Handles the 'follow' task - continuously follows a player
- * Note: This task remains active until interrupted by a new command
- * @param {Object} bot - The mineflayer bot instance
- * @param {Array} taskQueue - The task queue array
- * @param {Object} task - { type: 'follow', player: string }
+ * Activates continuous follow mode and removes the follow task from the queue.
  */
 async function handleFollow(bot, taskQueue, task) {
   try {
@@ -20,15 +17,18 @@ async function handleFollow(bot, taskQueue, task) {
       return;
     }
 
-    // Set up continuous following using GoalFollow
-    const goal = new GoalFollow(targetPlayer.entity, 3); // Stay 3 blocks away
-    bot.pathfinder.setGoal(goal, true); // dynamic = true for continuous following
-    bot.chat(`Following ${task.player}!`);
+    const goal = new GoalFollow(targetPlayer.entity, 3);
+    bot.pathfinder.setGoal(goal, true);
+    botState.setMode("follow");
+    botState.clearGoal();
 
-    // Note: Follow task stays in queue - it's continuous until interrupted
-    // We don't call completeCurrentTask() here
+    // Remove follow task from queue — mode keeps following until interrupt
+    taskQueue.shift();
+    botState.notifyQueueUpdated();
+
+    bot.chat(`Following ${task.player}!`);
   } catch (error) {
-    console.error("[Body] Follow error:", error.message);
+    console.error("[Follow] Error:", error.message);
     failTask(bot, taskQueue, `I couldn't follow: ${error.message}`);
   }
 }
@@ -36,4 +36,3 @@ async function handleFollow(bot, taskQueue, task) {
 module.exports = {
   handleFollow,
 };
-

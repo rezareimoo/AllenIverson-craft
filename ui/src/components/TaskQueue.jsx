@@ -30,6 +30,8 @@ function formatTaskDetails(task) {
       return `${format(task.target)} × ${task.count || 1}`;
     case 'smelt':
       return `${format(task.input)} → ${format(task.output)} × ${task.count || 1}`;
+    case 'give':
+      return `${format(task.target)} × ${task.count || 1} → ${task.player || 'player'}`;
     case 'place':
       return format(task.target);
     case 'move':

@@ -476,10 +476,16 @@ function validateCraftRequest(itemName, mcData) {
  * @returns {boolean} - True if the item is a raw material
  */
 function isRawMaterial(itemName, mcData) {
-  // Check if there's no crafting recipe for this item
+  if (!itemName) return true;
+
+  // Known world drops (raw_iron, coal, etc.) — avoid storage-block craft cycles
+  if (ITEM_TO_BLOCK_SOURCE[itemName]) {
+    return true;
+  }
+
   const item = mcData.itemsByName[itemName];
-  if (!item) return true; // Unknown items treated as raw materials
-  
+  if (!item) return true;
+
   const recipes = mcData.recipes[item.id];
   return !recipes || recipes.length === 0;
 }
@@ -543,14 +549,25 @@ function resolveCraftingDependencies(
   
   const needed = count - effectiveHave;
   
+  // Prefer mining known gatherable drops over crafting (avoids block↔item cycles)
+  if (ITEM_TO_BLOCK_SOURCE[itemName]) {
+    if (depth === 0) {
+      console.log(
+        `[Resolver] ${itemName} is a world drop -> collect ${ITEM_TO_BLOCK_SOURCE[itemName]}`
+      );
+    }
+    // Collect by ITEM name so inventory accounting matches drops
+    tasks.push({ type: "collect", target: itemName, count: needed });
+    return { feasible: true, tasks };
+  }
+
   // Check if item exists
   const item = mcData.itemsByName[itemName];
   if (!item) {
     // Unknown item - try to collect it as a block
     const block = mcData.blocksByName[itemName];
     if (block) {
-      const collectTarget = getCollectibleBlock(itemName, mcData);
-      tasks.push({ type: "collect", target: collectTarget, count: needed });
+      tasks.push({ type: "collect", target: itemName, count: needed });
       return { feasible: true, tasks };
     }
     return { 
@@ -592,7 +609,8 @@ function resolveCraftingDependencies(
     
     if (totalFuelHave < fuelNeeded) {
       const fuelToCollect = fuelNeeded - totalFuelHave;
-      tasks.push({ type: "collect", target: "coal_ore", count: fuelToCollect });
+      // Collect the ITEM "coal" (mining coal_ore drops coal) — not coal_ore
+      tasks.push({ type: "collect", target: "coal", count: fuelToCollect });
     }
     
     // Add smelt task
@@ -611,11 +629,11 @@ function resolveCraftingDependencies(
   
   // Check if this is a raw material (no recipe)
   if (isRawMaterial(itemName, mcData)) {
-    const collectTarget = getCollectibleBlock(itemName, mcData);
     if (depth === 0) {
-      console.log(`[Resolver] ${itemName} is a raw material -> collect ${collectTarget}`);
+      console.log(`[Resolver] ${itemName} is a raw material -> collect`);
     }
-    tasks.push({ type: "collect", target: collectTarget, count: needed });
+    // Prefer item name for inventory accounting (collect handler maps to blocks)
+    tasks.push({ type: "collect", target: itemName, count: needed });
     return { feasible: true, tasks };
   }
   

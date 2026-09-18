@@ -1,7 +1,5 @@
-// allenIverson.js - Minecraft AI Agent with LLM Integration
-// A robust, interruptible bot using mineflayer + Ollama
-// Supports multi-step task queues, crafting, and block placement
-// Now with Web UI via Express + Socket.io
+// allenIverson.js - Minecraft gathering companion
+// Intent → Goal → Deterministic plan → TaskController
 
 require("dotenv").config();
 const mineflayer = require("mineflayer");
@@ -13,8 +11,8 @@ const { Server } = require("socket.io");
 const cors = require("cors");
 const path = require("path");
 
-// Import modular components
 const { processUserRequest } = require("./brain");
+const { expandGoal } = require("./planner/expandGoal");
 const { handleCollect } = require("./handlers/collect");
 const { handleCraft } = require("./handlers/craft");
 const { handlePlace } = require("./handlers/place");
@@ -23,8 +21,14 @@ const { handleFollow } = require("./handlers/follow");
 const { handleInventory } = require("./handlers/inventory");
 const { handleStop, handleUnknown } = require("./handlers/stop");
 const { handleSmelt } = require("./handlers/smelt");
+const { handleGive } = require("./handlers/give");
 const { botState } = require("./state/botState");
-const { syncQueue, removeTaskAtIndex, clearQueue } = require("./utils/queue");
+const {
+  syncQueue,
+  removeTaskAtIndex,
+  clearQueue,
+  failTask,
+} = require("./utils/queue");
 const { getCollectibleBlocks } = require("./utils/blockNames");
 const {
   getCommonCraftableItems,
@@ -33,136 +37,80 @@ const {
   requiresCraftingTable,
 } = require("./utils/recipes");
 
-// ============================================================================
-// GLOBAL STATE - TASK QUEUE SYSTEM
-// ============================================================================
-// taskQueue holds an array of task objects to execute in sequence
-// Each task is a JSON object like: { type: 'collect', target: 'oak_log', count: 5 }
-// When queue is empty, the bot is IDLE
-let taskQueue = [];
+// Authoritative queue — always mutate in place via this reference
+const taskQueue = botState.getQueueRef();
 
-// Global minecraft-data reference (initialized on spawn)
 let mcData = null;
-
-// Flag to prevent overlapping task executions
-let isExecuting = false;
+let supervisionTimer = null;
+let inventoryHooked = false;
 
 // ============================================================================
-// EXPRESS + SOCKET.IO SERVER SETUP
+// EXPRESS + SOCKET.IO
 // ============================================================================
 const app = express();
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
   cors: {
-    origin: ["http://localhost:5173", "http://localhost:3001"],
+    origin: true, // Allow LAN dashboard access
     methods: ["GET", "POST", "DELETE"],
   },
 });
 
-// Middleware
-app.use(cors());
+app.use(cors({ origin: true }));
 app.use(express.json());
-
-// Serve static files from React build
 app.use(express.static(path.join(__dirname, "ui/dist")));
 
-// ============================================================================
-// API ROUTES
-// ============================================================================
+function emitQueue() {
+  io.emit("queue:updated", botState.getQueueState());
+}
 
-// Get current queue state
 app.get("/api/queue", (req, res) => {
-  res.json({
-    queue: taskQueue,
-    isExecuting,
-    currentTask: taskQueue.length > 0 ? taskQueue[0] : null,
-    queueLength: taskQueue.length,
-  });
+  res.json(botState.getQueueState());
 });
 
-// Add task(s) to queue
 app.post("/api/queue", (req, res) => {
   const { tasks } = req.body;
-
   if (!tasks || !Array.isArray(tasks)) {
     return res.status(400).json({ error: "Tasks must be an array" });
   }
-
-  // Validate tasks
   for (const task of tasks) {
     if (!task.type) {
       return res.status(400).json({ error: "Each task must have a type" });
     }
   }
-
   taskQueue.push(...tasks);
+  botState.setMode("working");
   syncQueue(taskQueue);
-
   console.log(`[API] Added ${tasks.length} task(s) to queue`);
-  io.emit("queue:updated", { queue: taskQueue, isExecuting });
-
-  res.json({ success: true, queue: taskQueue });
+  emitQueue();
+  res.json({ success: true, queue: botState.getQueue() });
 });
 
-// Remove task at index
 app.delete("/api/queue/:index", (req, res) => {
   const index = parseInt(req.params.index, 10);
-
   if (isNaN(index) || index < 0 || index >= taskQueue.length) {
     return res.status(400).json({ error: "Invalid index" });
   }
-
-  // Don't allow removing currently executing task
-  if (index === 0 && isExecuting) {
+  if (index === 0 && botState.isExecuting()) {
     return res
       .status(400)
       .json({ error: "Cannot remove currently executing task" });
   }
-
   const removed = removeTaskAtIndex(taskQueue, index);
-  console.log(`[API] Removed task at index ${index}:`, removed);
-  io.emit("queue:updated", { queue: taskQueue, isExecuting });
-
-  res.json({ success: true, removed, queue: taskQueue });
+  emitQueue();
+  res.json({ success: true, removed, queue: botState.getQueue() });
 });
 
-// Clear entire queue
 app.delete("/api/queue", (req, res) => {
-  // Stop any current pathfinding
-  try {
-    if (bot && bot.pathfinder) {
-      bot.pathfinder.stop();
-    }
-  } catch (e) {
-    // Pathfinder might not be active
-  }
-
-  clearQueue(taskQueue);
-  isExecuting = false;
-
-  console.log("[API] Queue cleared");
-  io.emit("queue:updated", { queue: taskQueue, isExecuting });
-
+  interruptBot("Queue cleared");
   res.json({ success: true, queue: [] });
 });
 
-// Get current inventory
 app.get("/api/inventory", (req, res) => {
-  if (!bot) {
-    return res.status(503).json({ error: "Bot not connected" });
-  }
-
-  const inventory = bot.inventory.items().map((item) => ({
-    name: item.name,
-    count: item.count,
-    displayName: item.displayName,
-    slot: item.slot,
-  }));
-
-  res.json({ inventory });
+  if (!bot) return res.status(503).json({ error: "Bot not connected" });
+  res.json({ inventory: botState.getInventory() });
 });
 
-// Get bot status
 app.get("/api/status", (req, res) => {
   res.json({
     connected: bot && bot.entity !== undefined,
@@ -177,248 +125,231 @@ app.get("/api/status", (req, res) => {
         : null,
     health: bot ? bot.health : null,
     food: bot ? bot.food : null,
-    isExecuting,
-    currentTask: taskQueue.length > 0 ? taskQueue[0] : null,
+    isExecuting: botState.isExecuting(),
+    mode: botState.getMode(),
+    currentGoal: botState.getCurrentGoal(),
+    currentTask: botState.getCurrentTask(),
     queueLength: taskQueue.length,
+    failureHistory: botState.getFailureHistory().slice(0, 5),
   });
 });
 
-// Get list of collectible blocks
+app.get("/api/goal", (req, res) => {
+  res.json({
+    goal: botState.getCurrentGoal(),
+    mode: botState.getMode(),
+    failureHistory: botState.getFailureHistory().slice(0, 10),
+  });
+});
+
 app.get("/api/blocks", (req, res) => {
-  if (!mcData) {
-    return res.status(503).json({ error: "Minecraft data not loaded" });
-  }
-
-  const blocks = getCollectibleBlocks(mcData);
-  res.json({ blocks });
+  if (!mcData) return res.status(503).json({ error: "Minecraft data not loaded" });
+  res.json({ blocks: getCollectibleBlocks(mcData) });
 });
 
-// Get list of craftable items with recipes
 app.get("/api/items", (req, res) => {
-  if (!mcData) {
-    return res.status(503).json({ error: "Minecraft data not loaded" });
-  }
-
-  const items = getCommonCraftableItems(mcData, 200);
-  res.json({ items });
+  if (!mcData) return res.status(503).json({ error: "Minecraft data not loaded" });
+  res.json({ items: getCommonCraftableItems(mcData, 200) });
 });
 
-// Get all items (for place/move tasks)
 app.get("/api/all-items", (req, res) => {
-  if (!mcData) {
-    return res.status(503).json({ error: "Minecraft data not loaded" });
-  }
-
-  const items = Object.keys(mcData.itemsByName);
-  const blocks = Object.keys(mcData.blocksByName);
-
-  res.json({ items, blocks });
+  if (!mcData) return res.status(503).json({ error: "Minecraft data not loaded" });
+  res.json({
+    items: Object.keys(mcData.itemsByName),
+    blocks: Object.keys(mcData.blocksByName),
+  });
 });
 
-// Get recipe details for a specific item
 app.get("/api/recipe/:itemName", (req, res) => {
-  if (!mcData) {
-    return res.status(503).json({ error: "Minecraft data not loaded" });
-  }
-
+  if (!mcData) return res.status(503).json({ error: "Minecraft data not loaded" });
   const { itemName } = req.params;
   const recipes = getRecipes(itemName, mcData);
-
   if (!recipes || recipes.length === 0) {
     return res.status(404).json({ error: `No recipe found for ${itemName}` });
   }
-
   const recipe = recipes[0];
-  const ingredients = getRecipeIngredients(recipe, mcData);
-  const needsTable = requiresCraftingTable(recipe);
-
   res.json({
     itemName,
-    ingredients,
-    requiresTable: needsTable,
+    ingredients: getRecipeIngredients(recipe, mcData),
+    requiresTable: requiresCraftingTable(recipe),
     outputCount: recipe.result?.count || 1,
   });
 });
 
-// Get online players
 app.get("/api/players", (req, res) => {
-  if (!bot) {
-    return res.status(503).json({ error: "Bot not connected" });
-  }
-
+  if (!bot) return res.status(503).json({ error: "Bot not connected" });
   const players = Object.keys(bot.players)
     .filter((name) => name !== bot.username)
     .map((name) => ({
       name,
       entity: bot.players[name].entity !== undefined,
+      position: bot.players[name].entity
+        ? {
+            x: bot.players[name].entity.position.x,
+            y: bot.players[name].entity.position.y,
+            z: bot.players[name].entity.position.z,
+          }
+        : null,
     }));
-
   res.json({ players });
 });
 
-// Serve React app for all other routes
 app.get("*", (req, res) => {
   const indexPath = path.join(__dirname, "ui/dist/index.html");
   const fs = require("fs");
-
   if (fs.existsSync(indexPath)) {
     res.sendFile(indexPath);
   } else {
     res.status(200).send(`
-      <!DOCTYPE html>
-      <html>
-        <head>
-          <title>AllenIverson Bot - Setup Required</title>
-          <style>
-            body { font-family: monospace; background: #1D1D1D; color: #fff; padding: 40px; }
-            h1 { color: #5D8731; }
-            code { background: #333; padding: 4px 8px; border-radius: 4px; }
-            .step { margin: 20px 0; padding: 15px; background: #2D2D2D; border-left: 4px solid #5D8731; }
-          </style>
-        </head>
-        <body>
-          <h1>AllenIverson Bot UI</h1>
-          <p>The UI hasn't been built yet. Choose one option:</p>
-          
-          <div class="step">
-            <h3>Option 1: Development Mode (Recommended)</h3>
-            <p>Run in a separate terminal:</p>
-            <code>cd ui && npm install && npm run dev</code>
-            <p>Then visit: <a href="http://localhost:5173" style="color:#5D8731">http://localhost:5173</a></p>
-          </div>
-          
-          <div class="step">
-            <h3>Option 2: Build for Production</h3>
-            <code>cd ui && npm install && npm run build</code>
-            <p>Then refresh this page.</p>
-          </div>
-          
-          <p style="margin-top: 30px; color: #888;">API is running at <a href="/api/status" style="color:#5D8731">/api/status</a></p>
-        </body>
-      </html>
-    `);
+      <!DOCTYPE html><html><head><title>AllenIverson Bot</title>
+      <style>body{font-family:monospace;background:#1D1D1D;color:#fff;padding:40px}
+      h1{color:#5D8731}code{background:#333;padding:4px 8px;border-radius:4px}</style>
+      </head><body>
+      <h1>AllenIverson Bot UI</h1>
+      <p>Build the UI: <code>cd ui && npm install && npm run build</code></p>
+      <p>Or dev: <code>cd ui && npm run dev</code> → http://localhost:5173</p>
+      <p>API: <a href="/api/status" style="color:#5D8731">/api/status</a></p>
+      </body></html>`);
   }
 });
 
-// ============================================================================
-// SOCKET.IO CONNECTION HANDLING
-// ============================================================================
 io.on("connection", (socket) => {
   console.log("[Socket] Client connected:", socket.id);
-
-  // Send initial state
   socket.emit("bot:status", {
     connected: bot && bot.entity !== undefined,
     version: bot ? bot.version : null,
+    mode: botState.getMode(),
+    currentGoal: botState.getCurrentGoal(),
   });
-
-  socket.emit("queue:updated", {
-    queue: taskQueue,
-    isExecuting,
-    currentTask: taskQueue.length > 0 ? taskQueue[0] : null,
-  });
-
+  socket.emit("queue:updated", botState.getQueueState());
   if (bot) {
-    socket.emit(
-      "inventory:updated",
-      bot.inventory.items().map((item) => ({
-        name: item.name,
-        count: item.count,
-        displayName: item.displayName,
-      }))
-    );
+    socket.emit("inventory:updated", botState.getInventory());
   }
-
   socket.on("disconnect", () => {
     console.log("[Socket] Client disconnected:", socket.id);
   });
 });
 
-// Forward botState events to Socket.io
-botState.on("queue:updated", (data) => {
-  io.emit("queue:updated", data);
-});
-
-botState.on("task:started", (data) => {
-  io.emit("task:started", data);
-});
-
-botState.on("task:completed", (data) => {
-  io.emit("task:completed", data);
-});
-
-botState.on("task:failed", (data) => {
-  io.emit("task:failed", data);
-});
-
-botState.on("inventory:updated", (data) => {
-  io.emit("inventory:updated", data);
-});
+botState.on("queue:updated", (data) => io.emit("queue:updated", data));
+botState.on("task:started", (data) => io.emit("task:started", data));
+botState.on("task:completed", (data) => io.emit("task:completed", data));
+botState.on("task:failed", (data) => io.emit("task:failed", data));
+botState.on("inventory:updated", (data) => io.emit("inventory:updated", data));
+botState.on("goal:updated", (data) => io.emit("goal:updated", data));
+botState.on("mode:changed", (data) => io.emit("mode:changed", data));
+botState.on("bot:status", (data) => io.emit("bot:status", data));
 
 // ============================================================================
-// BOT INITIALIZATION
+// BOT
 // ============================================================================
 const bot = mineflayer.createBot({
   host: process.env.MC_HOST || "localhost",
   port: parseInt(process.env.MC_PORT) || 25565,
   username: process.env.BOT_USERNAME || "AllenIverson",
-  version: false, // Auto-detect Minecraft version
+  version: false,
 });
 
-// Store bot reference in botState
 botState.setBot(bot);
-
-// Load plugins
 bot.loadPlugin(pathfinder);
 bot.loadPlugin(collectBlock);
 
-// ============================================================================
-// THE "BODY" - SUPERVISION LOOP
-// ============================================================================
+/**
+ * Stop pathfinder, bump cancel generation, clear queue in place.
+ */
+function interruptBot(reason) {
+  try {
+    if (bot.pathfinder) {
+      bot.pathfinder.setGoal(null);
+      bot.pathfinder.stop();
+    }
+  } catch (e) {}
+
+  botState.cancel(); // increments generation, clears queue, mode idle
+  botState.setExecuting(false);
+  console.log(`[Interrupt] ${reason || "interrupted"}`);
+  emitQueue();
+}
 
 /**
- * Main supervision loop that checks and executes tasks from the queue.
- * Runs every second to manage task execution sequentially.
+ * Re-expand the current goal from live inventory after a hard step failure.
  */
+function tryReplan(reason) {
+  const goal = botState.getCurrentGoal();
+  if (!goal || !mcData) {
+    botState.clearGoal();
+    botState.setMode("idle");
+    return false;
+  }
+
+  const replans = botState.incrementGoalReplans();
+  if (replans > botState.getMaxGoalReplans()) {
+    bot.chat(`I gave up after ${botState.getMaxGoalReplans()} replans: ${reason}`);
+    botState.clearGoal();
+    botState.setMode("idle");
+    return false;
+  }
+
+  console.log(`[Replan] Attempt ${replans}: ${reason}`);
+  const expanded = expandGoal(goal, {
+    mcData,
+    inventoryMap: botState.getInventoryMap(),
+    speaker: goal.player || goal._speaker,
+  });
+
+  if (!expanded.ok || !expanded.tasks.length) {
+    bot.chat(`I couldn't finish: ${expanded.reason || reason}`);
+    botState.clearGoal();
+    botState.setMode("idle");
+    return false;
+  }
+
+  botState.replaceQueue(expanded.tasks);
+  botState.setMode("working");
+  bot.chat(`Retrying plan (${expanded.tasks.length} steps)...`);
+  return true;
+}
+
 function supervisionLoop() {
-  // If no tasks or already executing, skip
-  if (taskQueue.length === 0 || isExecuting) {
+  // Follow mode: do not dispatch queue tasks until interrupted
+  if (botState.getMode() === "follow") {
     return;
   }
 
-  // Get the current task (front of queue)
+  if (taskQueue.length === 0 || botState.isExecuting()) {
+    return;
+  }
+
   const currentTask = taskQueue[0];
+  const cancelGen = botState.getCancelGeneration();
 
-  // Mark as executing to prevent overlapping calls
-  isExecuting = true;
   botState.setExecuting(true);
-
-  console.log(`[Supervisor] Executing task: ${JSON.stringify(currentTask)}`);
+  botState.setMode("working");
+  console.log(`[Supervisor] Executing: ${JSON.stringify(currentTask)}`);
   io.emit("task:started", { task: currentTask });
 
-  // Dispatch to appropriate handler based on task type
   (async () => {
     try {
       switch (currentTask.type) {
         case "collect":
-          await handleCollect(bot, mcData, taskQueue, currentTask);
+          await handleCollect(bot, mcData, taskQueue, currentTask, cancelGen);
           break;
         case "craft":
-          await handleCraft(bot, mcData, taskQueue, currentTask);
+          await handleCraft(bot, mcData, taskQueue, currentTask, cancelGen);
           break;
         case "smelt":
-          await handleSmelt(bot, mcData, taskQueue, currentTask);
+          await handleSmelt(bot, mcData, taskQueue, currentTask, cancelGen);
           break;
         case "place":
-          await handlePlace(bot, taskQueue, currentTask, mcData);
+          await handlePlace(bot, taskQueue, currentTask, mcData, cancelGen);
           break;
         case "move":
-          await handleMove(bot, taskQueue, currentTask);
+          await handleMove(bot, taskQueue, currentTask, cancelGen);
+          break;
+        case "give":
+          await handleGive(bot, mcData, taskQueue, currentTask, cancelGen);
           break;
         case "follow":
-          // Follow is continuous, handled differently
           await handleFollow(bot, taskQueue, currentTask);
-          // Don't complete - follow stays active until interrupted
           break;
         case "inventory":
           handleInventory(bot, taskQueue, currentTask);
@@ -431,44 +362,75 @@ function supervisionLoop() {
           break;
         default:
           console.log(`[Supervisor] Unknown task type: ${currentTask.type}`);
-          taskQueue.shift(); // Remove unknown task
+          taskQueue.shift();
           syncQueue(taskQueue);
       }
+
+      // If queue emptied due to failure with needsReplan, try once
+      if (
+        taskQueue.length === 0 &&
+        botState.getCurrentGoal() &&
+        botState.getMode() !== "follow"
+      ) {
+        // Check if last failure requested replan (goal still set, queue empty, not success)
+        const failures = botState.getFailureHistory();
+        if (failures.length > 0 && Date.now() - failures[0].at < 5000) {
+          tryReplan(failures[0].message);
+        }
+      }
     } catch (error) {
+      if (error.cancelled) {
+        console.log("[Supervisor] Task cancelled");
+        return;
+      }
       console.error("[Supervisor] Execution error:", error.message);
-      const { failTask } = require("./utils/queue");
-      failTask(bot, taskQueue, `Task failed: ${error.message}`);
+      const result = failTask(bot, taskQueue, `Task failed: ${error.message}`);
+      if (result === "replanned" || result === "abandoned") {
+        if (botState.getCurrentGoal()) tryReplan(error.message);
+      }
     } finally {
-      isExecuting = false;
-      botState.setExecuting(false);
-      // Emit inventory update after each task
-      io.emit(
-        "inventory:updated",
-        bot.inventory.items().map((item) => ({
-          name: item.name,
-          count: item.count,
-          displayName: item.displayName,
-        }))
-      );
+      if (!botState.isCancelled(cancelGen)) {
+        botState.setExecuting(false);
+        if (botState.getMode() !== "follow" && taskQueue.length === 0) {
+          if (!botState.getCurrentGoal()) botState.setMode("idle");
+        }
+      }
+      io.emit("inventory:updated", botState.getInventory());
     }
   })();
 }
 
-// ============================================================================
-// BOT EVENT HANDLERS
-// ============================================================================
+/**
+ * Strip wake-word prefix: "Allen", "Allen,", "hey Allen", bot username, etc.
+ */
+function extractCommand(message, botUsername) {
+  let text = message.trim();
+  const lower = text.toLowerCase();
+  const username = (botUsername || "AllenIverson").toLowerCase();
 
-// Spawn event - initialize minecraft-data and start supervision loop
+  // "hey allen ..." / "ok allen ..."
+  text = text.replace(/^(hey|ok|okay|yo|hi)\s+/i, "").trim();
+
+  if (lower.startsWith(username)) {
+    return text.slice(botUsername.length).replace(/^[,:\s]+/, "").trim();
+  }
+  if (lower.startsWith("alleniverson")) {
+    return text.slice(12).replace(/^[,:\s]+/, "").trim();
+  }
+  if (lower.startsWith("allen")) {
+    return text.slice(5).replace(/^[,:\s]+/, "").trim();
+  }
+  return null;
+}
+
 bot.on("spawn", () => {
   console.log("[Bot] AllenIverson has spawned!");
 
-  // Initialize minecraft-data for the detected version
   mcData = require("minecraft-data")(bot.version);
   botState.setMcData(mcData);
   botState.setConnected(true);
   console.log(`[Bot] Minecraft version: ${bot.version}`);
 
-  // Configure pathfinder movements
   const defaultMove = new Movements(bot, mcData);
   defaultMove.allow1by1towers = false;
   defaultMove.scafoldingCost = 6.0;
@@ -476,91 +438,77 @@ bot.on("spawn", () => {
   defaultMove.canDig = true;
   defaultMove.canBuild = true;
   bot.pathfinder.setMovements(defaultMove);
+  bot.pathfinder.thinkTimeout = 10000;
 
-  // Increase pathfinder timeout for complex paths (default is 5 seconds)
-  bot.pathfinder.thinkTimeout = 10000; // 10 seconds
+  // Only one supervision timer across respawns
+  if (supervisionTimer) clearInterval(supervisionTimer);
+  supervisionTimer = setInterval(supervisionLoop, 1000);
 
-  // Start the supervision loop (check every 1 second)
-  setInterval(supervisionLoop, 1000);
+  bot.chat("AllenIverson is ready! Tell me what to gather.");
 
-  bot.chat("AllenIverson is ready! Tell me what to do.");
-
-  // Notify connected clients
-  io.emit("bot:status", { connected: true, version: bot.version });
-  io.emit(
-    "inventory:updated",
-    bot.inventory.items().map((item) => ({
-      name: item.name,
-      count: item.count,
-      displayName: item.displayName,
-    }))
-  );
-
-  // Inventory change event (must be inside spawn as inventory isn't available before)
-  bot.inventory.on("updateSlot", () => {
-    io.emit(
-      "inventory:updated",
-      bot.inventory.items().map((item) => ({
-        name: item.name,
-        count: item.count,
-        displayName: item.displayName,
-      }))
-    );
+  io.emit("bot:status", {
+    connected: true,
+    version: bot.version,
+    mode: botState.getMode(),
   });
+  io.emit("inventory:updated", botState.getInventory());
+
+  if (!inventoryHooked && bot.inventory) {
+    inventoryHooked = true;
+    bot.inventory.on("updateSlot", () => {
+      io.emit("inventory:updated", botState.getInventory());
+    });
+  }
 });
 
-// Chat event - process user commands with interrupt capability
 bot.on("chat", async (username, message) => {
-  // Ignore own messages
   if (username === bot.username) return;
 
-  // Only process messages that start with "Allen" (case-insensitive)
-  const normalizedMessage = message.trim();
-  if (!normalizedMessage.toLowerCase().startsWith("allen")) {
-    return; // Ignore messages that don't start with "Allen"
-  }
+  const command = extractCommand(message, bot.username);
+  if (command === null) return;
+  if (!command) return;
 
-  // Extract the actual command (remove "Allen" prefix)
-  const command = normalizedMessage.substring(5).trim(); // Remove "Allen" (5 chars)
-  if (!command) {
-    return; // Ignore if there's no command after "Allen"
-  }
+  console.log(`[Chat] ${username}: ${message} → "${command}"`);
 
-  console.log(`[Chat] ${username}: ${message} (command: "${command}")`);
+  interruptBot("New chat command");
 
-  // INTERRUPT: Stop any current action immediately
-  try {
-    bot.pathfinder.stop();
-  } catch (e) {
-    // Pathfinder might not be active, that's okay
-  }
+  bot.chat("On it...");
+  const result = await processUserRequest(command, mcData, {
+    speaker: username,
+  });
 
-  // Clear the entire task queue (interrupt current plan)
-  taskQueue = [];
-  isExecuting = false;
-  syncQueue(taskQueue);
+  // Ignore if a newer interrupt happened while planning
+  // (cancel gen already bumped; just don't load stale plan if another command came)
 
-  // Process the new request through the LLM
-  bot.chat("Planning...");
-  const newTasks = await processUserRequest(command, mcData);
-
-  if (newTasks && newTasks.length > 0) {
-    console.log(
-      `[Chat] New task queue (${newTasks.length} tasks):`,
-      JSON.stringify(newTasks)
-    );
-    taskQueue = newTasks;
-    syncQueue(taskQueue);
-
-    if (newTasks.length > 1) {
-      bot.chat(`Got it! I have ${newTasks.length} steps to complete.`);
+  if (!result.tasks || result.tasks.length === 0) {
+    bot.chat(result.reason || "Sorry, I couldn't understand that.");
+    if (result.reason && result.source === "none") {
+      // hint already in reason
     }
-  } else {
-    bot.chat("Sorry, I couldn't understand that command.");
+    return;
   }
+
+  const goal = result.goal || null;
+  if (goal) {
+    goal._speaker = username;
+    botState.setCurrentGoal(goal);
+  }
+
+  botState.replaceQueue(result.tasks);
+  botState.setMode(result.tasks[0]?.type === "follow" ? "working" : "working");
+
+  if (result.message) {
+    bot.chat(result.message);
+  } else if (result.tasks.length > 1) {
+    bot.chat(`Got it — ${result.tasks.length} steps.`);
+  }
+
+  console.log(
+    `[Chat] Goal=${JSON.stringify(goal)} source=${result.source} tasks=${result.tasks.length}`
+  );
+  emitQueue();
 });
 
-// Error handling
 bot.on("error", (err) => {
   console.error("[Bot] Error:", err.message);
   io.emit("bot:status", { connected: false, error: err.message });
@@ -578,16 +526,11 @@ bot.on("end", () => {
   io.emit("bot:status", { connected: false });
 });
 
-// ============================================================================
-// START SERVERS
-// ============================================================================
 const UI_PORT = process.env.UI_PORT || 3001;
-
 httpServer.listen(UI_PORT, () => {
   console.log(`[Server] Web UI available at http://localhost:${UI_PORT}`);
 });
 
-// Log when bot is ready to connect
 console.log("[Bot] Starting AllenIverson...");
 console.log(
   `[Bot] Connecting to ${process.env.MC_HOST || "localhost"}:${

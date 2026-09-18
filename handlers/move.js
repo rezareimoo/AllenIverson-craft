@@ -3,12 +3,17 @@
  */
 
 const { GoalNear } = require("mineflayer-pathfinder").goals;
-const { completeCurrentTask, failTask } = require("../utils/queue");
+const {
+  completeCurrentTask,
+  failTask,
+  assertNotCancelled,
+} = require("../utils/queue");
 const mcData = require("minecraft-data");
 const {
   validateAndCorrectName,
   getSuggestions,
 } = require("../utils/blockNames");
+const { botState } = require("../state/botState");
 
 /**
  * Finds a player target and returns movement info
@@ -112,13 +117,25 @@ function findBlockTarget(bot, blockSpec, radius = 2) {
  * @param {Array} taskQueue - The task queue array
  * @param {Object} task - { type: 'move', block?: string|object, player? }
  */
-async function handleMove(bot, taskQueue, task) {
+async function handleMove(bot, taskQueue, task, cancelGen) {
   const MAX_RETRIES = 2;
+  const gen = cancelGen ?? botState.getCancelGeneration();
 
   try {
+    assertNotCancelled(gen);
     let target;
 
     if (task.player) {
+      // Briefly reacquire player if out of view
+      let targetPlayer = bot.players[task.player];
+      if (!targetPlayer?.entity) {
+        for (let i = 0; i < 4; i++) {
+          assertNotCancelled(gen);
+          await new Promise((r) => setTimeout(r, 400));
+          targetPlayer = bot.players[task.player];
+          if (targetPlayer?.entity) break;
+        }
+      }
       target = findPlayerTarget(bot, task.player);
     } else if (task.block) {
       target = findBlockTarget(bot, task.block, task.radius);
@@ -131,19 +148,25 @@ async function handleMove(bot, taskQueue, task) {
       return;
     }
 
-    const { pos, range, successMessage } = target;
+    let { pos, range, successMessage } = target;
 
-    // Use GoalNear to get close to the target without breaking it
+    // For players, refresh position right before pathing
+    if (task.player && bot.players[task.player]?.entity) {
+      pos = bot.players[task.player].entity.position;
+    }
+
     const goal = new GoalNear(pos.x, pos.y, pos.z, range);
 
-    // Retry pathfinding up to MAX_RETRIES times
     let lastError;
     for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
       try {
+        assertNotCancelled(gen);
         await bot.pathfinder.goto(goal);
+        assertNotCancelled(gen);
         completeCurrentTask(bot, taskQueue, successMessage);
-        return; // Success - exit the function
+        return;
       } catch (pathError) {
+        if (pathError.cancelled) throw pathError;
         lastError = pathError;
         console.log(
           `[Move] Pathfinding attempt ${attempt}/${MAX_RETRIES} failed: ${pathError.message}`
@@ -151,16 +174,18 @@ async function handleMove(bot, taskQueue, task) {
 
         if (attempt < MAX_RETRIES) {
           bot.chat(`Retrying pathfinding... (attempt ${attempt + 1})`);
-          // Small delay before retry
           await new Promise((resolve) => setTimeout(resolve, 500));
         }
       }
     }
 
-    // All retries exhausted - fail the task
     throw lastError;
   } catch (error) {
-    console.error("[Body] Move error:", error.message);
+    if (error.cancelled) {
+      console.log("[Move] Cancelled");
+      return;
+    }
+    console.error("[Move] Error:", error.message);
 
     // Provide more specific error messages for pathfinding failures
     let errorMessage = error.message;

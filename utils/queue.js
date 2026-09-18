@@ -1,6 +1,6 @@
 /**
  * Queue management utilities
- * Uses shared botState for event emission
+ * Uses shared botState for the authoritative queue and event emission.
  */
 
 const { botState } = require("../state/botState");
@@ -8,18 +8,18 @@ const { botState } = require("../state/botState");
 /**
  * Completes the current task and moves to the next one in the queue.
  * @param {Object} bot - The mineflayer bot instance
- * @param {Array} taskQueue - The task queue array
+ * @param {Array} taskQueue - The task queue array (must be botState.getQueueRef())
  * @param {string} message - Optional completion message to chat
  */
 function completeCurrentTask(bot, taskQueue, message = null) {
   if (message) {
     bot.chat(message);
   }
-  
-  const completedTask = taskQueue.shift(); // Remove completed task from front of queue
-  
-  // Sync with botState and emit event
-  botState.setQueue(taskQueue);
+
+  const completedTask = taskQueue.shift();
+  botState.resetStepRetries();
+  botState.notifyQueueUpdated();
+
   if (completedTask) {
     botState.emit("task:completed", { task: completedTask });
   }
@@ -29,101 +29,133 @@ function completeCurrentTask(bot, taskQueue, message = null) {
   } else {
     console.log("[Queue] All tasks completed!");
     bot.chat("All done!");
+    botState.clearGoal();
+    if (botState.getMode() !== "follow") {
+      botState.setMode("idle");
+    }
   }
-  
-  // Emit inventory update after task completion
+
   botState.emitInventoryUpdate();
 }
 
 /**
- * Fails the current task and clears the entire queue.
- * @param {Object} bot - The mineflayer bot instance
- * @param {Array} taskQueue - The task queue array (will be cleared)
- * @param {string} message - Error message to chat
+ * Fails the current step. Retries a few times, then clears remaining plan
+ * and emits failure so the supervisor can replan from the current goal.
+ *
+ * @returns {'retried'|'replanned'|'abandoned'}
  */
-function failTask(bot, taskQueue, message) {
+function failTask(bot, taskQueue, message, options = {}) {
+  const { fatal = false } = options;
+  const failedTask = taskQueue[0] || null;
+
+  botState.pushFailure(message, failedTask);
   bot.chat(message);
-  const failedTask = taskQueue[0];
-  taskQueue.length = 0; // Clear the entire queue on failure
-  
-  // Sync with botState and emit event
-  botState.setQueue(taskQueue);
-  botState.emit("task:failed", { task: failedTask, message });
-  
-  console.log("[Queue] Task failed, queue cleared");
+
+  if (!fatal) {
+    const retries = botState.incrementStepRetries();
+    if (retries <= botState.getMaxStepRetries()) {
+      console.log(
+        `[Queue] Step failed (retry ${retries}/${botState.getMaxStepRetries()}): ${message}`
+      );
+      botState.emit("task:failed", {
+        task: failedTask,
+        message,
+        retrying: true,
+        retries,
+      });
+      botState.notifyQueueUpdated();
+      return "retried";
+    }
+  }
+
+  console.log(`[Queue] Task failed, abandoning current plan: ${message}`);
+  taskQueue.length = 0;
+  botState.resetStepRetries();
+  botState.notifyQueueUpdated();
+  botState.emit("task:failed", {
+    task: failedTask,
+    message,
+    retrying: false,
+    needsReplan: !!botState.getCurrentGoal(),
+  });
+
+  return botState.getCurrentGoal() ? "replanned" : "abandoned";
 }
 
 /**
- * Adds a task to the queue
- * @param {Array} taskQueue - The task queue array
- * @param {Object} task - The task to add
+ * Hard-fail: clear queue and goal immediately (used for stop / unknown).
  */
+function abandonAll(bot, taskQueue, message) {
+  if (message) bot.chat(message);
+  const failedTask = taskQueue[0] || null;
+  if (message) botState.pushFailure(message, failedTask);
+  taskQueue.length = 0;
+  botState.resetStepRetries();
+  botState.clearGoal();
+  botState.setMode("idle");
+  botState.notifyQueueUpdated();
+  if (failedTask && message) {
+    botState.emit("task:failed", {
+      task: failedTask,
+      message,
+      retrying: false,
+    });
+  }
+}
+
 function addTask(taskQueue, task) {
   taskQueue.push(task);
-  botState.setQueue(taskQueue);
+  botState.notifyQueueUpdated();
 }
 
-/**
- * Adds multiple tasks to the queue
- * @param {Array} taskQueue - The task queue array
- * @param {Array} tasks - Array of tasks to add
- */
 function addTasks(taskQueue, tasks) {
   taskQueue.push(...tasks);
-  botState.setQueue(taskQueue);
+  botState.notifyQueueUpdated();
 }
 
-/**
- * Inserts tasks at the front of the queue
- * @param {Array} taskQueue - The task queue array
- * @param {Array} tasks - Array of tasks to insert
- */
 function insertTasksAtFront(taskQueue, tasks) {
   for (let i = tasks.length - 1; i >= 0; i--) {
     taskQueue.unshift(tasks[i]);
   }
-  botState.setQueue(taskQueue);
+  botState.notifyQueueUpdated();
 }
 
-/**
- * Removes a task at a specific index
- * @param {Array} taskQueue - The task queue array
- * @param {number} index - Index of task to remove
- * @returns {Object|null} The removed task or null
- */
 function removeTaskAtIndex(taskQueue, index) {
   if (index >= 0 && index < taskQueue.length) {
     const removed = taskQueue.splice(index, 1)[0];
-    botState.setQueue(taskQueue);
+    botState.notifyQueueUpdated();
     return removed;
   }
   return null;
 }
 
-/**
- * Clears the entire queue
- * @param {Array} taskQueue - The task queue array
- */
 function clearQueue(taskQueue) {
   taskQueue.length = 0;
-  botState.setQueue(taskQueue);
+  botState.resetStepRetries();
+  botState.notifyQueueUpdated();
 }
 
-/**
- * Syncs the taskQueue with botState (call after direct modifications)
- * @param {Array} taskQueue - The task queue array
- */
 function syncQueue(taskQueue) {
-  botState.setQueue(taskQueue);
+  botState.notifyQueueUpdated();
+}
+
+function assertNotCancelled(generation) {
+  if (botState.isCancelled(generation)) {
+    const err = new Error("CANCELLED");
+    err.cancelled = true;
+    throw err;
+  }
 }
 
 module.exports = {
   completeCurrentTask,
   failTask,
+  abandonAll,
   addTask,
   addTasks,
   insertTasksAtFront,
   removeTaskAtIndex,
   clearQueue,
   syncQueue,
+  assertNotCancelled,
 };

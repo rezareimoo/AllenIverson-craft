@@ -10,7 +10,7 @@
 const ITEM_TO_BLOCK_SOURCE = {
   // Stone drops cobblestone when mined (without silk touch)
   cobblestone: "stone",
-  
+
   // Overworld ores drop items (fortune affects some)
   diamond: "diamond_ore",
   coal: "coal_ore",
@@ -20,57 +20,71 @@ const ITEM_TO_BLOCK_SOURCE = {
   raw_iron: "iron_ore",
   raw_gold: "gold_ore",
   raw_copper: "copper_ore",
-  
+
   // Deepslate variants
   deepslate_cobblestone: "deepslate",
-  
-  // Deepslate ores (same drops as regular ores)
-  // diamond: "deepslate_diamond_ore", // already mapped above, would need special handling
-  
+
   // Nether blocks and ores
   quartz: "nether_quartz_ore",
   gold_nugget: "nether_gold_ore",
-  
+
   // Gravel drops flint sometimes (10% base chance)
   flint: "gravel",
-  
+
   // Glowstone drops dust (2-4 dust per block)
   glowstone_dust: "glowstone",
-  
+
   // Amethyst
   amethyst_shard: "amethyst_cluster",
-  
+
   // Crops and plants
-  wheat: "wheat", // Breaking mature wheat gives wheat item
-  wheat_seeds: "grass", // Also from breaking wheat
+  wheat: "wheat",
+  wheat_seeds: "grass",
   beetroot: "beetroots",
   beetroot_seeds: "beetroots",
   carrot: "carrots",
   potato: "potatoes",
-  
-  // String from cobwebs (shears give cobweb block, sword gives string)
+
+  // String from cobwebs
   string: "cobweb",
-  
+
   // Sea stuff
   prismarine_crystals: "sea_lantern",
-  prismarine_shard: "prismarine", // Also from guardians
-  
+  prismarine_shard: "prismarine",
+
   // Ice variants
-  ice: "packed_ice", // Mining packed ice with silk touch logic varies
-  
-  // Leaves drop sticks and saplings but that's random
-  // apple: "oak_leaves", // Random drop, not reliable
-  
+  ice: "packed_ice",
+
   // Clay
   clay_ball: "clay",
-  
+
   // Snow
-  snowball: "snow", // Snow layer
-  snow_block: "snow_block", // Requires silk touch otherwise drops snowballs
-  
+  snowball: "snow",
+  snow_block: "snow_block",
+
   // Sculk
-  sculk_catalyst: "sculk_catalyst", // Drops XP, no item without silk touch
+  sculk_catalyst: "sculk_catalyst",
 };
+
+/**
+ * Reverse map: block mined -> item that typically appears in inventory
+ * (without silk touch). Used so collect("coal_ore") counts "coal".
+ */
+const BLOCK_TO_ITEM_DROP = Object.fromEntries(
+  Object.entries(ITEM_TO_BLOCK_SOURCE).map(([item, block]) => [block, item])
+);
+
+/** Ore blocks that also have deepslate_ variants */
+const DEEPSLATE_ORE_VARIANTS = [
+  "coal_ore",
+  "iron_ore",
+  "gold_ore",
+  "copper_ore",
+  "diamond_ore",
+  "emerald_ore",
+  "lapis_ore",
+  "redstone_ore",
+];
 
 /**
  * Maps crafted items to their raw collectable materials
@@ -181,6 +195,8 @@ const FUEL_ITEMS = [
 
 module.exports = {
   ITEM_TO_BLOCK_SOURCE,
+  BLOCK_TO_ITEM_DROP,
+  DEEPSLATE_ORE_VARIANTS,
   ITEM_TO_RAW_MATERIAL,
   SMELTABLE_ITEMS,
   FUEL_ITEMS,

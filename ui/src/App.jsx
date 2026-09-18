@@ -16,6 +16,9 @@ function App() {
     queue,
     isExecuting,
     currentTask,
+    currentGoal,
+    mode,
+    failureHistory,
     inventory,
     lastEvent,
     fetchQueue,
@@ -39,7 +42,7 @@ function App() {
   const [recipes, setRecipes] = useState({});
   const [notification, setNotification] = useState(null);
 
-  // Load initial data
+  // Load initial data + poll status
   useEffect(() => {
     const loadData = async () => {
       const [blocksData, itemsData, allItemsData, playersData] = await Promise.all([
@@ -51,17 +54,15 @@ function App() {
       
       setBlocks(blocksData || []);
       
-      // Items come with recipe info
       if (itemsData) {
         setItems(itemsData.map(i => i.name || i));
-        // Build recipes map
         const recipesMap = {};
         for (const item of itemsData) {
           if (item.name && item.ingredients) {
             recipesMap[item.name] = {
               ingredients: item.ingredients,
               requiresTable: item.requiresTable,
-              outputCount: 1, // Default, could be enhanced
+              outputCount: item.outputCount || 1,
             };
           }
         }
@@ -70,18 +71,25 @@ function App() {
       
       setAllItems(allItemsData?.blocks || []);
       setPlayers(playersData || []);
+      await fetchStatus();
     };
     
     loadData();
     
-    // Refresh players periodically
     const playersInterval = setInterval(async () => {
       const playersData = await fetchPlayers();
       setPlayers(playersData || []);
     }, 5000);
+
+    const statusInterval = setInterval(() => {
+      fetchStatus();
+    }, 3000);
     
-    return () => clearInterval(playersInterval);
-  }, [fetchBlocks, fetchItems, fetchAllItems, fetchPlayers]);
+    return () => {
+      clearInterval(playersInterval);
+      clearInterval(statusInterval);
+    };
+  }, [fetchBlocks, fetchItems, fetchAllItems, fetchPlayers, fetchStatus]);
 
   // Fetch recipe and cache it
   const handleFetchRecipe = useCallback(async (itemName) => {
@@ -134,7 +142,8 @@ function App() {
     
     if (message) {
       setNotification({ message, type, timestamp: lastEvent.timestamp });
-      setTimeout(() => setNotification(null), 3000);
+      // Keep failure toasts visible longer
+      setTimeout(() => setNotification(null), type === 'error' ? 8000 : 3000);
     }
   }, [lastEvent]);
 
@@ -197,6 +206,9 @@ function App() {
           <span className="mc-text">
             {botStatus.connected ? `Connected (${botStatus.version})` : 'Disconnected'}
           </span>
+          {botStatus.connected && mode && mode !== 'idle' && (
+            <span className="mc-badge mc-badge--info">{mode}</span>
+          )}
           {botStatus.connected && currentTask && (
             <span className="mc-badge mc-badge--running">
               {currentTask.type}
@@ -261,6 +273,19 @@ function App() {
           <div className="mc-panel">
             <div className="mc-panel__header">Bot Status</div>
             <div className="mc-text-small" style={{ color: 'var(--mc-text)' }}>
+              {currentGoal && (
+                <div style={{ marginBottom: '8px' }}>
+                  <strong>Goal:</strong>{' '}
+                  {currentGoal.intent}
+                  {currentGoal.item ? ` ${currentGoal.count || 1}× ${currentGoal.item}` : ''}
+                  {currentGoal.player ? ` → ${currentGoal.player}` : ''}
+                </div>
+              )}
+              {mode && (
+                <div style={{ marginBottom: '8px' }}>
+                  <strong>Mode:</strong> {mode}
+                </div>
+              )}
               {botStatus.position && (
                 <div style={{ marginBottom: '8px' }}>
                   <strong>Position:</strong> {' '}
@@ -269,16 +294,29 @@ function App() {
                   Z: {botStatus.position.z?.toFixed(1)}
                 </div>
               )}
-              {botStatus.health !== undefined && (
+              {botStatus.health !== undefined && botStatus.health !== null && (
                 <div style={{ marginBottom: '4px' }}>
                   <strong>Health:</strong> {botStatus.health}/20
                 </div>
               )}
-              {botStatus.food !== undefined && (
+              {botStatus.food !== undefined && botStatus.food !== null && (
                 <div>
                   <strong>Food:</strong> {botStatus.food}/20
                 </div>
               )}
+            </div>
+          </div>
+        )}
+
+        {failureHistory?.length > 0 && (
+          <div className="mc-panel">
+            <div className="mc-panel__header">Recent Failures</div>
+            <div className="mc-text-small" style={{ color: 'var(--mc-text)' }}>
+              {failureHistory.slice(0, 5).map((f, i) => (
+                <div key={i} style={{ marginBottom: '6px', opacity: 0.9 }}>
+                  {f.message}
+                </div>
+              ))}
             </div>
           </div>
         )}
@@ -290,22 +328,19 @@ function App() {
           </div>
           <div className="mc-text-small" style={{ color: 'var(--mc-inventory-bg)' }}>
             <p style={{ marginBottom: '8px' }}>
-              <strong>Collect:</strong> Gather blocks from the world
+              <strong>Chat:</strong> Allen collect 10 oak logs
             </p>
             <p style={{ marginBottom: '8px' }}>
-              <strong>Craft:</strong> Create items using recipes
+              <strong>Craft:</strong> Allen make me an iron pickaxe
             </p>
             <p style={{ marginBottom: '8px' }}>
-              <strong>Place:</strong> Place blocks from inventory
+              <strong>Deliver:</strong> Allen bring me 8 oak planks
             </p>
             <p style={{ marginBottom: '8px' }}>
-              <strong>Move:</strong> Navigate to blocks or players
-            </p>
-            <p style={{ marginBottom: '8px' }}>
-              <strong>Follow:</strong> Continuously follow a player
+              <strong>Come:</strong> Allen come to me
             </p>
             <p>
-              <strong>Tip:</strong> Green ✓ means craftable, red ✗ shows missing materials
+              <strong>Tip:</strong> Pattern commands work without Ollama
             </p>
           </div>
         </div>
