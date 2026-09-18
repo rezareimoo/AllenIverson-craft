@@ -2,7 +2,7 @@
  * Recipe validation and lookup utilities using minecraft-data
  */
 
-const { ITEM_TO_BLOCK_SOURCE, SMELTABLE_ITEMS, FUEL_ITEMS } = require("../config/constants");
+const { ITEM_TO_BLOCK_SOURCE, SMELTABLE_ITEMS, FUEL_ITEMS, blockSourcesForItem, primaryBlockSource } = require("../config/constants");
 
 /**
  * Checks if an item is obtained through smelting
@@ -498,17 +498,21 @@ function isRawMaterial(itemName, mcData) {
  * @returns {string} - The block name to collect
  */
 function getCollectibleBlock(itemName, mcData) {
-  // Check if this item has a special block source
-  if (ITEM_TO_BLOCK_SOURCE[itemName]) {
-    return ITEM_TO_BLOCK_SOURCE[itemName];
+  // Check if this item has a special block source (pick first that exists in this version)
+  const sources = blockSourcesForItem(itemName);
+  if (sources) {
+    for (const name of sources) {
+      if (mcData.blocksByName[name]) return name;
+    }
+    return primaryBlockSource(itemName);
   }
-  
+
   // Check if a block with this name exists
   const block = mcData.blocksByName[itemName];
   if (block) {
     return itemName;
   }
-  
+
   // For items without a direct block, return the item name
   // The collect handler will deal with it or fail gracefully
   return itemName;
@@ -552,8 +556,9 @@ function resolveCraftingDependencies(
   // Prefer mining known gatherable drops over crafting (avoids block↔item cycles)
   if (ITEM_TO_BLOCK_SOURCE[itemName]) {
     if (depth === 0) {
+      const sources = blockSourcesForItem(itemName) || [];
       console.log(
-        `[Resolver] ${itemName} is a world drop -> collect ${ITEM_TO_BLOCK_SOURCE[itemName]}`
+        `[Resolver] ${itemName} is a world drop -> collect ${sources.join("/")}`
       );
     }
     // Collect by ITEM name so inventory accounting matches drops

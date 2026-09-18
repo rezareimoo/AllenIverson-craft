@@ -14,7 +14,7 @@ class BotState extends EventEmitter {
     this._botInstance = null;
     this._mcData = null;
     this._isConnected = false;
-    /** @type {'idle'|'follow'|'working'} */
+    /** @type {'idle'|'follow'|'working'|'farming'} */
     this._mode = "idle";
     /** @type {Object|null} High-level goal being pursued */
     this._currentGoal = null;

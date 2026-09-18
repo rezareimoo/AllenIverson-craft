@@ -37,9 +37,10 @@ const ITEM_TO_BLOCK_SOURCE = {
   // Amethyst
   amethyst_shard: "amethyst_cluster",
 
-  // Crops and plants
+  // Crops and plants (item → block(s) to mine)
+  // Arrays: try each name for version differences (grass → short_grass in 1.20.3+)
   wheat: "wheat",
-  wheat_seeds: "grass",
+  wheat_seeds: ["short_grass", "tall_grass", "grass"],
   beetroot: "beetroots",
   beetroot_seeds: "beetroots",
   carrot: "carrots",
@@ -67,12 +68,34 @@ const ITEM_TO_BLOCK_SOURCE = {
 };
 
 /**
+ * Normalize ITEM_TO_BLOCK_SOURCE value to a list of block names.
+ */
+function blockSourcesForItem(itemName) {
+  const src = ITEM_TO_BLOCK_SOURCE[itemName];
+  if (!src) return null;
+  return Array.isArray(src) ? src : [src];
+}
+
+/**
+ * Primary (first) block source for an item.
+ */
+function primaryBlockSource(itemName) {
+  const list = blockSourcesForItem(itemName);
+  return list ? list[0] : null;
+}
+
+/**
  * Reverse map: block mined -> item that typically appears in inventory
  * (without silk touch). Used so collect("coal_ore") counts "coal".
+ * Skips multi-block sources (e.g. grass variants → wheat_seeds) so
+ * collect("short_grass") still means the grass item, not seeds.
  */
-const BLOCK_TO_ITEM_DROP = Object.fromEntries(
-  Object.entries(ITEM_TO_BLOCK_SOURCE).map(([item, block]) => [block, item])
-);
+const BLOCK_TO_ITEM_DROP = {};
+for (const [item, block] of Object.entries(ITEM_TO_BLOCK_SOURCE)) {
+  if (Array.isArray(block)) continue;
+  if (block === item) continue;
+  BLOCK_TO_ITEM_DROP[block] = item;
+}
 
 /** Ore blocks that also have deepslate_ variants */
 const DEEPSLATE_ORE_VARIANTS = [
@@ -196,6 +219,8 @@ const FUEL_ITEMS = [
 module.exports = {
   ITEM_TO_BLOCK_SOURCE,
   BLOCK_TO_ITEM_DROP,
+  blockSourcesForItem,
+  primaryBlockSource,
   DEEPSLATE_ORE_VARIANTS,
   ITEM_TO_RAW_MATERIAL,
   SMELTABLE_ITEMS,

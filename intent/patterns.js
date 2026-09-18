@@ -42,7 +42,22 @@ const ITEM_ALIASES = {
   "wooden shovel": "wooden_shovel",
   "stone shovel": "stone_shovel",
   "iron shovel": "iron_shovel",
+  carrot: "carrot",
+  carrots: "carrot",
+  potato: "potato",
+  potatoes: "potato",
+  wheat: "wheat",
+  "wheat seeds": "wheat_seeds",
+  wheat_seeds: "wheat_seeds",
+  seeds: "wheat_seeds",
+  "wheat seed": "wheat_seeds",
+  "carrot seeds": "carrot",
+  "potato seeds": "potato",
   "wooden hoe": "wooden_hoe",
+  "stone hoe": "stone_hoe",
+  "iron hoe": "iron_hoe",
+  bucket: "bucket",
+  "water bucket": "water_bucket",
   "crafting table": "crafting_table",
   workbench: "crafting_table",
   furnace: "furnace",
@@ -154,6 +169,50 @@ function matchPatterns(message, context = {}) {
   const { speaker = null, mcData = null } = context;
   const text = message.toLowerCase().trim().replace(/[?.!]+$/g, "");
 
+  // stop farming / resume farming (before generic stop)
+  if (/^(stop farming|pause farming)$/i.test(text)) {
+    return { intent: "farm_pause" };
+  }
+  if (/^(resume farming|start farming)$/i.test(text)) {
+    return { intent: "farm_resume" };
+  }
+
+  // farm status / list farms
+  if (
+    /^(list farms|farm status|farms|show farms|my farms)$/i.test(text) ||
+    /^(what|how many).*farms?/i.test(text)
+  ) {
+    return { intent: "farm_status" };
+  }
+
+  // make/build/set up a (wheat|carrot|potato) farm [here]
+  let m = text.match(
+    /^(?:make|build|create|set\s*up)\s+(?:me\s+)?(?:a\s+)?(wheat|carrot|potato)s?\s+farm(?:\s+here)?$/i
+  );
+  if (m) {
+    return { intent: "farm_create", crop: m[1].toLowerCase() };
+  }
+  m = text.match(
+    /^(?:make|build|create|set\s*up)\s+(?:me\s+)?(?:a\s+)?farm(?:\s+here)?(?:\s+of\s+(wheat|carrot|potato)s?)?$/i
+  );
+  if (m) {
+    return { intent: "farm_create", crop: (m[1] || "wheat").toLowerCase() };
+  }
+
+  // tend/adopt/register this farm
+  m = text.match(
+    /^(?:tend|adopt|register|claim)\s+(?:this\s+)?(?:(wheat|carrot|potato)s?\s+)?farm(?:\s+here)?$/i
+  );
+  if (m) {
+    return {
+      intent: "farm_adopt",
+      crop: m[1] ? m[1].toLowerCase() : null,
+    };
+  }
+  if (/^(farm here|tend farm|adopt farm)$/i.test(text)) {
+    return { intent: "farm_adopt", crop: null };
+  }
+
   // stop
   if (/^(stop|halt|cancel|nevermind|never mind)$/i.test(text)) {
     return { intent: "stop" };
@@ -175,7 +234,7 @@ function matchPatterns(message, context = {}) {
   }
 
   // follow [me|player]
-  let m = text.match(/^follow(?:\s+(me|[\w]+))?$/i);
+  m = text.match(/^follow(?:\s+(me|[\w]+))?$/i);
   if (m) {
     const who = !m[1] || m[1] === "me" ? speaker : m[1];
     return { intent: "follow", player: who };

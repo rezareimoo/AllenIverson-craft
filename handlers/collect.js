@@ -3,9 +3,9 @@
  */
 
 const {
-  ITEM_TO_BLOCK_SOURCE,
   BLOCK_TO_ITEM_DROP,
   DEEPSLATE_ORE_VARIANTS,
+  blockSourcesForItem,
 } = require("../config/constants");
 const {
   completeCurrentTask,
@@ -19,6 +19,7 @@ const {
 } = require("../utils/blockNames");
 const { botState } = require("../state/botState");
 const { applyPathingMovements } = require("../utils/pathing");
+const { resolveFarmingTerm } = require("../farming/crops");
 
 /** Pickaxe preference for ore/stone (best first) */
 const PICKAXES = [
@@ -49,45 +50,68 @@ const SHOVELS = [
 ];
 
 /**
- * Resolve what block to mine and which inventory item to count.
+ * Resolve what block(s) to mine and which inventory item to count.
+ * @returns {{ blocksToMine: string[], itemToCount: string }}
  */
 function resolveCollectTargets(target) {
-  // Item that drops from a different block (coal → coal_ore)
-  if (ITEM_TO_BLOCK_SOURCE[target]) {
+  // Item → block source(s) (coal→coal_ore, wheat_seeds→short_grass/tall_grass/grass)
+  const sources = blockSourcesForItem(target);
+  if (sources) {
     return {
-      blockToMine: ITEM_TO_BLOCK_SOURCE[target],
+      blocksToMine: sources,
       itemToCount: target,
     };
   }
 
-  // Asked for an ore block name but mining drops an item (coal_ore → coal)
+  // Asked for an ore/plant block name but mining drops an item (coal_ore → coal)
   if (BLOCK_TO_ITEM_DROP[target]) {
     return {
-      blockToMine: target,
+      blocksToMine: [target],
       itemToCount: BLOCK_TO_ITEM_DROP[target],
     };
   }
 
-  return { blockToMine: target, itemToCount: target };
+  // Farming aliases: "seeds", plant-block synonyms not in constants
+  const farm = resolveFarmingTerm(target);
+  if (farm) {
+    const raw = String(target).toLowerCase();
+    if (
+      raw === "seeds" ||
+      raw.endsWith("_seeds") ||
+      raw === farm.seedItem ||
+      raw === farm.plantBlock
+    ) {
+      return {
+        blocksToMine: farm.blocksToMine,
+        itemToCount: farm.itemToCount,
+      };
+    }
+  }
+
+  return { blocksToMine: [target], itemToCount: target };
 }
 
-function getBlockIdsToSearch(blockToMine, mcData) {
+function getBlockIdsToSearch(blocksToMine, mcData) {
+  const names = Array.isArray(blocksToMine) ? blocksToMine : [blocksToMine];
   const ids = [];
-  const primary = mcData.blocksByName[blockToMine];
-  if (primary) ids.push(primary.id);
 
-  if (DEEPSLATE_ORE_VARIANTS.includes(blockToMine)) {
-    const deep = mcData.blocksByName[`deepslate_${blockToMine}`];
-    if (deep) ids.push(deep.id);
+  for (const blockToMine of names) {
+    const primary = mcData.blocksByName[blockToMine];
+    if (primary) ids.push(primary.id);
+
+    if (DEEPSLATE_ORE_VARIANTS.includes(blockToMine)) {
+      const deep = mcData.blocksByName[`deepslate_${blockToMine}`];
+      if (deep) ids.push(deep.id);
+    }
+
+    // If mining stone for cobble, also allow cobblestone blocks
+    if (blockToMine === "stone") {
+      const cobble = mcData.blocksByName["cobblestone"];
+      if (cobble) ids.push(cobble.id);
+    }
   }
 
-  // If mining stone for cobble, also allow cobblestone blocks
-  if (blockToMine === "stone") {
-    const cobble = mcData.blocksByName["cobblestone"];
-    if (cobble) ids.push(cobble.id);
-  }
-
-  return ids;
+  return [...new Set(ids)];
 }
 
 async function equipBestTool(bot, block) {
@@ -126,8 +150,21 @@ async function equipBestTool(bot, block) {
   }
 
   // Soft blocks don't need tools
-  const soft = ["dirt", "sand", "gravel", "clay", "grass_block", "snow"];
-  if (soft.some((s) => name.includes(s))) return null;
+  const soft = [
+    "dirt",
+    "sand",
+    "gravel",
+    "clay",
+    "grass_block",
+    "short_grass",
+    "tall_grass",
+    "grass",
+    "snow",
+    "wheat",
+    "carrots",
+    "potatoes",
+  ];
+  if (soft.some((s) => name === s || name.includes(s))) return null;
 
   // Logs can be punched slowly
   if (name.includes("log") || name.includes("stem")) return null;
@@ -185,9 +222,9 @@ async function handleCollect(bot, mcData, taskQueue, task, cancelGen) {
       target = validation.corrected;
     }
 
-    const { blockToMine, itemToCount } = resolveCollectTargets(target);
+    const { blocksToMine, itemToCount } = resolveCollectTargets(target);
     console.log(
-      `[Collect] Mine "${blockToMine}", count inventory item "${itemToCount}"`
+      `[Collect] Mine [${blocksToMine.join(", ")}], count inventory item "${itemToCount}"`
     );
 
     const currentCount = getInventoryCount(bot, itemToCount);
@@ -201,7 +238,7 @@ async function handleCollect(bot, mcData, taskQueue, task, cancelGen) {
     }
 
     const needed = count - currentCount;
-    const blockIds = getBlockIdsToSearch(blockToMine, mcData);
+    const blockIds = getBlockIdsToSearch(blocksToMine, mcData);
     if (blockIds.length === 0) {
       failTask(bot, taskQueue, `I don't know what "${target}" is.`);
       return;
@@ -222,7 +259,11 @@ async function handleCollect(bot, mcData, taskQueue, task, cancelGen) {
     }
 
     if (blocks.length === 0) {
-      failTask(bot, taskQueue, `I can't find any ${blockToMine} nearby.`);
+      failTask(
+        bot,
+        taskQueue,
+        `I can't find any ${blocksToMine.join("/")} nearby.`
+      );
       return;
     }
 
@@ -230,7 +271,7 @@ async function handleCollect(bot, mcData, taskQueue, task, cancelGen) {
       (a, b) => botPos.distanceTo(a) - botPos.distanceTo(b)
     );
 
-    bot.chat(`Found ${blocks.length} ${blockToMine}. Collecting...`);
+    bot.chat(`Found ${blocks.length} ${blocksToMine[0]}. Collecting...`);
 
     // Don't spend reserved craft materials while pathing to ores
     applyPathingMovements(bot, mcData, taskQueue, {

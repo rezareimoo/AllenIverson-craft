@@ -19,6 +19,7 @@ function App() {
     currentGoal,
     mode,
     failureHistory,
+    farms,
     inventory,
     lastEvent,
     fetchQueue,
@@ -286,6 +287,25 @@ function App() {
                   <strong>Mode:</strong> {mode}
                 </div>
               )}
+              {farms && (
+                <div style={{ marginBottom: '8px' }}>
+                  <strong>Farms:</strong>{' '}
+                  {farms.farmCount || 0}
+                  {farms.enabled === false ? ' (paused)' : ''}
+                  {farms.currentFarmId != null
+                    ? ` — tending #${farms.currentFarmId}`
+                    : ''}
+                  {farms.farms?.length > 0 && (
+                    <div style={{ marginTop: '4px', opacity: 0.85 }}>
+                      {farms.farms.map((f) => (
+                        <div key={f.id}>
+                          #{f.id} {f.crop}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
               {botStatus.position && (
                 <div style={{ marginBottom: '8px' }}>
                   <strong>Position:</strong> {' '}
@@ -332,6 +352,12 @@ function App() {
             </p>
             <p style={{ marginBottom: '8px' }}>
               <strong>Craft:</strong> Allen make me an iron pickaxe
+            </p>
+            <p style={{ marginBottom: '8px' }}>
+              <strong>Farm:</strong> Allen make a wheat farm here
+            </p>
+            <p style={{ marginBottom: '8px' }}>
+              <strong>Adopt:</strong> Allen tend this farm
             </p>
             <p style={{ marginBottom: '8px' }}>
               <strong>Deliver:</strong> Allen bring me 8 oak planks

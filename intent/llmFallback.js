@@ -18,6 +18,11 @@ const VALID_INTENTS = new Set([
   "follow",
   "inventory",
   "stop",
+  "farm_create",
+  "farm_adopt",
+  "farm_status",
+  "farm_pause",
+  "farm_resume",
   "unknown",
 ]);
 
@@ -36,8 +41,9 @@ Speaker username: "${speaker}"
 Bot inventory summary: ${inventorySummary}
 
 Output ONLY a JSON object with:
-- "intent": one of collect, craft, smelt, give, move, follow, inventory, stop, unknown
+- "intent": one of collect, craft, smelt, give, move, follow, inventory, stop, farm_create, farm_adopt, farm_status, farm_pause, farm_resume, unknown
 - "item": exact lowercase snake_case minecraft item/block name when needed
+- "crop": wheat, carrot, or potato (also wheat_seeds/carrots/potatoes — normalized internally)
 - "count": positive number (default 1)
 - "player": username when move/follow/give refers to a person (use "${speaker}" for "me")
 - "block": block name for move-to-block
@@ -46,6 +52,8 @@ Output ONLY a JSON object with:
 Rules:
 - Do NOT output multi-step plans or arrays.
 - For "make/craft X" use intent craft with item X — dependencies are handled elsewhere.
+- For "make a wheat farm" use farm_create with crop wheat (not craft).
+- For "tend this farm" use farm_adopt.
 - For "bring/give me X" use intent give.
 - For "come to me" use intent move with player "${speaker}".
 - Use exact names like oak_log, iron_pickaxe, cobblestone, raw_iron, iron_ingot.
@@ -56,6 +64,7 @@ Rules:
     properties: {
       intent: { type: "string" },
       item: { type: "string" },
+      crop: { type: "string" },
       count: { type: "number" },
       player: { type: "string" },
       block: { type: "string" },

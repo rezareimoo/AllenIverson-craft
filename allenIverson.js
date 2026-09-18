@@ -22,12 +22,15 @@ const { handleInventory } = require("./handlers/inventory");
 const { handleStop, handleUnknown } = require("./handlers/stop");
 const { handleSmelt } = require("./handlers/smelt");
 const { handleGive } = require("./handlers/give");
+const { handleFarmCreate } = require("./handlers/farmSetup");
+const { handleFarmAdopt } = require("./handlers/farmAdopt");
 const { botState } = require("./state/botState");
 const {
   syncQueue,
   removeTaskAtIndex,
   clearQueue,
   failTask,
+  completeCurrentTask,
 } = require("./utils/queue");
 const { applyPathingMovements } = require("./utils/pathing");
 const { getCollectibleBlocks } = require("./utils/blockNames");
@@ -37,6 +40,8 @@ const {
   getRecipes,
   requiresCraftingTable,
 } = require("./utils/recipes");
+const { farmRegistry } = require("./farming/farmRegistry");
+const { tickFarmScheduler } = require("./farming/scheduler");
 
 // Authoritative queue — always mutate in place via this reference
 const taskQueue = botState.getQueueRef();
@@ -113,6 +118,7 @@ app.get("/api/inventory", (req, res) => {
 });
 
 app.get("/api/status", (req, res) => {
+  const farms = farmRegistry.getPublicState();
   res.json({
     connected: bot && bot.entity !== undefined,
     version: bot ? bot.version : null,
@@ -132,7 +138,12 @@ app.get("/api/status", (req, res) => {
     currentTask: botState.getCurrentTask(),
     queueLength: taskQueue.length,
     failureHistory: botState.getFailureHistory().slice(0, 5),
+    farms,
   });
+});
+
+app.get("/api/farms", (req, res) => {
+  res.json(farmRegistry.getPublicState());
 });
 
 app.get("/api/goal", (req, res) => {
@@ -223,6 +234,7 @@ io.on("connection", (socket) => {
     currentGoal: botState.getCurrentGoal(),
   });
   socket.emit("queue:updated", botState.getQueueState());
+  socket.emit("farms:updated", farmRegistry.getPublicState());
   if (bot) {
     socket.emit("inventory:updated", botState.getInventory());
   }
@@ -239,6 +251,7 @@ botState.on("inventory:updated", (data) => io.emit("inventory:updated", data));
 botState.on("goal:updated", (data) => io.emit("goal:updated", data));
 botState.on("mode:changed", (data) => io.emit("mode:changed", data));
 botState.on("bot:status", (data) => io.emit("bot:status", data));
+farmRegistry.on("farms:updated", (data) => io.emit("farms:updated", data));
 
 // ============================================================================
 // BOT
@@ -316,6 +329,16 @@ function supervisionLoop() {
     return;
   }
 
+  // Standby farming when idle with empty queue
+  if (taskQueue.length === 0 && !botState.isExecuting()) {
+    if (botState.getMode() === "idle" || botState.getMode() === "farming") {
+      tickFarmScheduler(bot, mcData, taskQueue).catch((e) =>
+        console.error("[FarmScheduler]", e.message)
+      );
+    }
+    return;
+  }
+
   if (taskQueue.length === 0 || botState.isExecuting()) {
     return;
   }
@@ -369,6 +392,33 @@ function supervisionLoop() {
         case "inventory":
           handleInventory(bot, taskQueue, currentTask);
           break;
+        case "farm_create":
+          await handleFarmCreate(bot, mcData, taskQueue, currentTask, cancelGen);
+          break;
+        case "farm_adopt":
+          await handleFarmAdopt(bot, mcData, taskQueue, currentTask, cancelGen);
+          break;
+        case "farm_status":
+          completeCurrentTask(
+            bot,
+            taskQueue,
+            farmRegistry.formatStatusChat()
+          );
+          break;
+        case "farm_pause":
+          farmRegistry.setEnabled(false);
+          completeCurrentTask(bot, taskQueue, "Farm tending paused.");
+          break;
+        case "farm_resume":
+          farmRegistry.setEnabled(true);
+          completeCurrentTask(
+            bot,
+            taskQueue,
+            farmRegistry.getActiveFarms().length
+              ? "Farm tending resumed."
+              : "Farming on — make or adopt a farm first."
+          );
+          break;
         case "stop":
           handleStop(bot, taskQueue);
           break;
@@ -387,7 +437,6 @@ function supervisionLoop() {
         botState.getCurrentGoal() &&
         botState.getMode() !== "follow"
       ) {
-        // Check if last failure requested replan (goal still set, queue empty, not success)
         const failures = botState.getFailureHistory();
         if (failures.length > 0 && Date.now() - failures[0].at < 5000) {
           tryReplan(failures[0].message);
@@ -406,7 +455,11 @@ function supervisionLoop() {
     } finally {
       if (!botState.isCancelled(cancelGen)) {
         botState.setExecuting(false);
-        if (botState.getMode() !== "follow" && taskQueue.length === 0) {
+        if (
+          botState.getMode() !== "follow" &&
+          botState.getMode() !== "farming" &&
+          taskQueue.length === 0
+        ) {
           if (!botState.getCurrentGoal()) botState.setMode("idle");
         }
       }

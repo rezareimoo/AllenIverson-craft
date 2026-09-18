@@ -21,6 +21,7 @@ export function useBotSocket() {
   const [currentGoal, setCurrentGoal] = useState(null);
   const [mode, setMode] = useState('idle');
   const [failureHistory, setFailureHistory] = useState([]);
+  const [farms, setFarms] = useState({ farmCount: 0, farms: [], enabled: true, currentFarmId: null });
   const [inventory, setInventory] = useState([]);
   const [lastEvent, setLastEvent] = useState(null);
   
@@ -78,6 +79,10 @@ export function useBotSocket() {
 
     socket.on('mode:changed', (data) => {
       setMode(data.mode || 'idle');
+    });
+
+    socket.on('farms:updated', (data) => {
+      setFarms(data || { farmCount: 0, farms: [], enabled: true });
     });
 
     // Task lifecycle events
@@ -210,6 +215,7 @@ export function useBotSocket() {
       if (data.currentGoal !== undefined) setCurrentGoal(data.currentGoal);
       if (data.mode) setMode(data.mode);
       if (data.failureHistory) setFailureHistory(data.failureHistory);
+      if (data.farms) setFarms(data.farms);
       return data;
     } catch (error) {
       console.error('[API] Failed to fetch status:', error);
@@ -286,6 +292,7 @@ export function useBotSocket() {
     currentGoal,
     mode,
     failureHistory,
+    farms,
     
     // Inventory state
     inventory,

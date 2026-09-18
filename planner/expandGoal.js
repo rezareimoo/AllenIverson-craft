@@ -9,6 +9,7 @@ const {
   validateCraftRequest,
 } = require("../utils/recipes");
 const { resolveItemName } = require("../intent/patterns");
+const { normalizeCrop } = require("../farming/crops");
 
 /**
  * @param {object} goal
@@ -181,7 +182,6 @@ function expandGoal(goal, context = {}) {
       const tasks = [];
 
       if (have < count && mcData) {
-        // Acquire first via craft/collect resolver when possible
         const smeltInfo = SMELTABLE_ITEMS[item];
         const craftable =
           smeltInfo ||
@@ -198,7 +198,6 @@ function expandGoal(goal, context = {}) {
           if (resolution.feasible && resolution.tasks.length > 0) {
             tasks.push(...resolution.tasks);
           } else if (!resolution.feasible) {
-            // Fall back to collect
             tasks.push({ type: "collect", target: item, count });
           }
         } else {
@@ -213,6 +212,52 @@ function expandGoal(goal, context = {}) {
         message: `Getting ${count} ${item} for ${player}.`,
       };
     }
+
+    case "farm_create": {
+      const crop = normalizeCrop(goal.crop || "wheat");
+      if (!crop) {
+        return {
+          ok: false,
+          tasks: [],
+          reason: "I can make wheat, carrot, or potato farms.",
+        };
+      }
+      return {
+        ok: true,
+        tasks: [{ type: "farm_create", crop }],
+        message: `Setting up a ${crop} farm here.`,
+      };
+    }
+
+    case "farm_adopt": {
+      const crop = goal.crop ? normalizeCrop(goal.crop) : null;
+      return {
+        ok: true,
+        tasks: [{ type: "farm_adopt", crop }],
+        message: "Looking for farmland to adopt...",
+      };
+    }
+
+    case "farm_status":
+      return {
+        ok: true,
+        tasks: [{ type: "farm_status" }],
+        message: "Checking farms...",
+      };
+
+    case "farm_pause":
+      return {
+        ok: true,
+        tasks: [{ type: "farm_pause" }],
+        message: "Pausing farm tending.",
+      };
+
+    case "farm_resume":
+      return {
+        ok: true,
+        tasks: [{ type: "farm_resume" }],
+        message: "Resuming farm tending.",
+      };
 
     case "unknown":
       return {
